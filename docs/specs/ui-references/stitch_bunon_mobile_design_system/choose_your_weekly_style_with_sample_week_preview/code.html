@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_stack" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "tertiary": "#000000", "tertiary-fixed-dim": "#ffba4b", "surface-container-high": "#e7e8e9", "surface-dim": "#d9dadb", "on-error-container": "#93000a", "on-primary": "#ffffff", "surface-container-low": "#f3f4f5", "surface-bright": "#f8f9fa", "secondary": "#5c5f60", "on-background": "#191c1d", "primary-container": "#1b1b1c", "inverse-on-surface": "#f0f1f2", "outline": "#76777b", "on-tertiary-container": "#b37800", "secondary-fixed": "#e1e2e4", "on-secondary": "#ffffff", "tertiary-fixed": "#ffddb1", "primary-fixed": "#e5e2e3", "error-container": "#ffdad6", "background": "#f8f9fa", "on-secondary-container": "#5f6163", "on-primary-container": "#858384", "on-primary-fixed": "#1b1b1c", "on-tertiary": "#ffffff", "on-tertiary-fixed": "#291800", "on-surface-variant": "#46474a", "outline-variant": "#c7c6ca", "error": "#ba1a1a", "surface-container-lowest": "#ffffff", "primary": "#000000", "surface-variant": "#e1e3e4", "primary-fixed-dim": "#c8c6c7", "on-primary-fixed-variant": "#474647", "surface-container-highest": "#e1e3e4", "tertiary-container": "#291800", "on-tertiary-fixed-variant": "#624000", "on-secondary-fixed-variant": "#454749", "surface": "#f8f9fa", "on-secondary-fixed": "#191c1e", "secondary-container": "#dcdddf", "on-surface": "#191c1d", "surface-container": "#edeeef", "inverse-primary": "#c8c6c7", "inverse-surface": "#2e3132", "secondary-fixed-dim": "#c5c6c8", "on-error": "#ffffff", "surface-tint": "#5f5e5f" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-lg": "1.5rem", "margin": "1rem", "gutter": "1rem", "space-sm": "0.5rem", "space-md": "1rem", "space-xl": "2rem", "space-xs": "0.25rem" }, "fontFamily": { "body-sm": ["Inter"], "body-md": ["Inter"], "headline-md": ["Inter"], "headline-lg": ["Inter"], "label-sm": ["Inter"], "headline-xl": ["Inter"], "label-md": ["Inter"], "headline-sm": ["Inter"], "body-lg": ["Inter"] }, "fontSize": { "body-sm": ["13px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400" }], "body-md": ["15px", { "lineHeight": "21px", "letterSpacing": "0em", "fontWeight": "400" }], "headline-md": ["20px", { "lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "600" }], "headline-lg": ["24px", { "lineHeight": "30px", "letterSpacing": "-0.015em", "fontWeight": "600" }], "label-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "500" }], "headline-xl": ["30px", { "lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "600" }], "label-md": ["14px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500" }], "headline-sm": ["17px", { "lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "600" }], "body-lg": ["16px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "400" }] } } } };</script><style>@layer base { html, body { margin: 0; padding: 0; min-height: 100%; background-color: #f8f9fa; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); } .pt-safe { padding-top: env(safe-area-inset-top, 0px); } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-surface text-on-surface antialiased flex flex-col min-h-screen"><header class="fixed top-0 w-full z-50 pt-safe bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-14 px-margin flex items-center justify-between"><button aria-label="Go back" class="w-11 h-11 -ml-space-xs flex items-center justify-center rounded-full text-on-surface hover:bg-surface-container transition-colors" onclick="history.back()" type="button"><span class="material-symbols-outlined text-[22px]">arrow_back</span></button><h1 class="font-headline-sm text-headline-sm text-on-surface text-center truncate px-space-xs">Milestone Detail</h1><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><main class="flex flex-col flex-1 w-full bg-surface pt-14 pb-safe"><div class="flex flex-col w-full pb-32">
+<div class="px-margin pt-space-md flex flex-col gap-space-md">
+<!-- Heading Narrative -->
+<div class="flex flex-col">
+<h2 class="font-headline-md text-headline-md text-on-surface">How should Bunon lay out your weeks?</h2>
+<p class="font-body-sm text-body-sm text-secondary mt-1">You can change this anytime from your settings or milestone review.</p>
+</div>
+<!-- Mode Selectors Stack -->
+<div aria-label="Weekly planning structure" class="flex flex-col gap-space-md" role="radiogroup">
+<!-- Card 1: Flexible Weekly Queue (Active Default) -->
+<div class="bg-surface-container-lowest p-[18px] rounded-[20px] transition-all cursor-pointer relative shadow-none" id="card-flexible" onclick="selectStyle('flexible')" style="box-shadow: inset 0 0 0 2px #191c1d;">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-4 h-4 rounded-full flex items-center justify-center bg-surface-container-lowest" id="radio-flexible" style="box-shadow: inset 0 0 0 4px #191c1d;"></div>
+<span class="font-label-md text-label-md text-on-surface">Flexible weekly queue</span>
+</div>
+<span class="font-label-sm text-[10px] leading-tight bg-surface-container-low text-on-surface px-2 py-0.5 rounded-full">Recommended for Work</span>
+</div>
+<p class="font-body-sm text-body-sm text-secondary mt-1.5">Work any day in bursts; no daily locks</p>
+<!-- Miniature Sample Week Preview -->
+<div class="mt-2.5 bg-surface-container-lowest rounded-[14px] p-3 flex flex-col gap-2 bg-surface-container-low/60">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-[10px] uppercase tracking-wider text-outline">Sample Week Preview</span>
+<span class="font-label-sm text-[10px] text-secondary">3 targets</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center justify-between text-body-sm py-1 bg-surface-container-lowest/80 px-2 rounded-lg">
+<div class="flex items-center gap-2 min-w-0">
+<span class="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0"></span>
+<span class="text-on-surface text-body-sm truncate">Deliverable 1: /login wireframe</span>
+</div>
+<span class="text-outline text-label-sm flex-shrink-0 ml-2">45m</span>
+</div>
+<div class="flex items-center justify-between text-body-sm py-1 bg-surface-container-lowest/80 px-2 rounded-lg">
+<div class="flex items-center gap-2 min-w-0">
+<span class="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0"></span>
+<span class="text-on-surface text-body-sm truncate">Deliverable 2: Supabase auth schema</span>
+</div>
+<span class="text-outline text-label-sm flex-shrink-0 ml-2">60m</span>
+</div>
+<div class="flex items-center justify-between text-body-sm py-1 bg-surface-container-lowest/80 px-2 rounded-lg">
+<div class="flex items-center gap-2 min-w-0">
+<span class="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0"></span>
+<span class="text-on-surface text-body-sm truncate">Deliverable 3: Today step breakdown</span>
+</div>
+<span class="text-outline text-label-sm flex-shrink-0 ml-2">30m</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Card 2: Daily Adaptive Steps -->
+<div class="bg-surface-container-lowest p-[18px] rounded-[20px] transition-all cursor-pointer relative shadow-none" id="card-daily" onclick="selectStyle('daily')" style="box-shadow: inset 0 0 0 1px #e1e3e4;">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-4 h-4 rounded-full bg-surface-container-lowest" id="radio-daily" style="box-shadow: inset 0 0 0 1.5px #76777b;"></div>
+<span class="font-label-md text-label-md text-on-surface">Daily adaptive steps</span>
+</div>
+<span class="font-label-sm text-[10px] text-outline">Fixed pacing</span>
+</div>
+<p class="font-body-sm text-body-sm text-secondary mt-1.5">Calibrated daily slots matching your exact tuition &amp; work days</p>
+<!-- Miniature Sample Week Preview -->
+<div class="mt-2.5 bg-surface-container-lowest rounded-[14px] p-3 flex flex-col gap-2 bg-surface-container-low/60">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-[10px] uppercase tracking-wider text-outline">Sample Week Preview</span>
+<span class="font-label-sm text-[10px] text-secondary">Calendar synched</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center justify-between text-body-sm py-1 bg-surface-container-lowest/80 px-2 rounded-lg">
+<div class="flex items-center gap-1.5 min-w-0">
+<span class="font-label-sm text-outline flex-shrink-0">Sun</span>
+<span class="text-on-surface text-body-sm truncate">Step 1 (wireframe)</span>
+</div>
+<span class="text-outline text-label-sm flex-shrink-0 ml-2">25m</span>
+</div>
+<div class="flex items-center justify-between text-body-sm py-1 bg-surface-container-lowest/80 px-2 rounded-lg">
+<div class="flex items-center gap-1.5 min-w-0">
+<span class="font-label-sm text-outline flex-shrink-0">Mon</span>
+<span class="font-label-sm text-[10px] bg-secondary-container text-on-surface px-1.5 py-0.5 rounded flex-shrink-0">Tuition</span>
+<span class="text-on-surface text-body-sm truncate">Light Step 2</span>
+</div>
+<span class="text-outline text-label-sm flex-shrink-0 ml-2">20m</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Reminder Settings Module -->
+<div class="bg-surface-container-lowest rounded-[16px] p-4 flex items-center justify-between shadow-none" style="box-shadow: inset 0 0 0 1px #e1e3e4;">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface">Daily reminder</span>
+<span class="font-label-sm text-[11px] text-secondary mt-0.5">Web Push notification · No spam</span>
+</div>
+<!-- Time Selector Pill -->
+<button class="bg-surface-container-low px-3 py-1.5 rounded-full flex items-center gap-1.5 text-on-surface transition-colors active:bg-surface-container" id="reminder-btn" onclick="cycleReminderTime()" type="button">
+<span class="font-label-sm text-label-sm" id="reminder-val">8:00 AM</span>
+<span class="material-symbols-outlined text-[16px] text-outline">expand_more</span>
+</button>
+</div>
+<!-- Context micro-summary info banner -->
+<div class="flex items-center gap-2.5 px-2 py-1">
+<span class="material-symbols-outlined text-outline text-[18px]">verified</span>
+<p class="font-body-sm text-body-sm text-secondary">
+        Milestone steps will recalculate seamlessly without losing completed work.
+      </p>
+</div>
+</div>
+<!-- Persistent Single-Action Bottom Control -->
+<div class="fixed bottom-0 left-0 right-0 z-30 bg-surface-container-lowest/95 backdrop-blur-md pb-safe">
+<div class="max-w-[428px] mx-auto p-margin flex flex-col">
+<button class="w-full h-[52px] bg-primary text-on-primary rounded-full font-label-md text-label-md flex items-center justify-center transition-transform active:scale-[0.99] select-none" onclick="confirmAndBuild()" type="button">
+        Build Week 1 &amp; start Day 1
+      </button>
+</div>
+</div>
+</div>
+<script>
+  let selectedMode = 'flexible';
+  const times = ['7:00 AM', '8:00 AM', '9:30 AM', '6:00 PM', '8:30 PM'];
+  let timeIndex = 1;
+
+  function selectStyle(mode) {
+    selectedMode = mode;
+    const cardFlex = document.getElementById('card-flexible');
+    const radioFlex = document.getElementById('radio-flexible');
+    const cardDaily = document.getElementById('card-daily');
+    const radioDaily = document.getElementById('radio-daily');
+
+    if (mode === 'flexible') {
+      cardFlex.style.boxShadow = 'inset 0 0 0 2px #191c1d';
+      radioFlex.style.boxShadow = 'inset 0 0 0 4px #191c1d';
+      
+      cardDaily.style.boxShadow = 'inset 0 0 0 1px #e1e3e4';
+      radioDaily.style.boxShadow = 'inset 0 0 0 1.5px #76777b';
+    } else {
+      cardDaily.style.boxShadow = 'inset 0 0 0 2px #191c1d';
+      radioDaily.style.boxShadow = 'inset 0 0 0 4px #191c1d';
+      
+      cardFlex.style.boxShadow = 'inset 0 0 0 1px #e1e3e4';
+      radioFlex.style.boxShadow = 'inset 0 0 0 1.5px #76777b';
+    }
+  }
+
+  function cycleReminderTime() {
+    timeIndex = (timeIndex + 1) % times.length;
+    const label = document.getElementById('reminder-val');
+    if (label) {
+      label.textContent = times[timeIndex];
+    }
+  }
+
+  function confirmAndBuild() {
+    const btn = document.querySelector('button[onclick="confirmAndBuild()"]');
+    if (btn) {
+      btn.style.opacity = '0.7';
+      btn.textContent = 'Configuring Week 1...';
+      setTimeout(() => {
+        btn.textContent = 'Ready';
+      }, 500);
+    }
+  }
+</script></main></body></html>
