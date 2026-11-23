@@ -29,8 +29,36 @@ export function AuthCard() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const ensureUserWithRetry = async () => {
+    let res = await fetch('/api/auth/ensure-user', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      // Retry once after 250ms for cookie propagation timing
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      res = await fetch('/api/auth/ensure-user', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || errJson.error || 'Failed to initialize user profile.');
+      }
+    }
+  };
+
   const complete = async (target: string) => {
-    await fetch('/api/auth/ensure-user', { method: 'POST' });
+    try {
+      await ensureUserWithRetry();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error initializing user';
+      console.error('[ensure-user error]', msg);
+      setMessage(msg);
+      setBusy(false);
+      return;
+    }
+
     const supabase = createClient();
     const {
       data: { user },
@@ -40,12 +68,13 @@ export function AuthCard() {
       ? await supabase.from('users').select('birth_year').eq('id', user.id).maybeSingle()
       : { data: null };
 
-    if (profile?.birth_year === null) {
-      router.replace(`/setup?next=${encodeURIComponent(target)}`);
-    } else {
-      router.replace(target);
-    }
-    router.refresh();
+    const targetUrl =
+      profile?.birth_year === null || profile?.birth_year === undefined
+        ? `/setup?next=${encodeURIComponent(target)}`
+        : target;
+
+    // Use window.location.assign so fresh Supabase SSR cookies are sent on the next request
+    window.location.assign(targetUrl);
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -78,11 +107,14 @@ export function AuthCard() {
       if (error) {
         setMessage(error.message);
         setBusy(false);
-      } else if (!data.session) {
-        setMessage('Check your email once to confirm your account, then sign in.');
+      } else if (data.session) {
+        await complete(next);
+      } else if (data.user) {
+        setMessage('Please check your email inbox to confirm your account, then sign in.');
         setBusy(false);
       } else {
-        await complete(next);
+        setMessage('Unexpected sign-up response. Please try signing in.');
+        setBusy(false);
       }
     }
   };

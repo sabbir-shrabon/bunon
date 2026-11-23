@@ -6,10 +6,36 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 import { createClient } from '@/lib/db/server';
 import { getTodayPlan } from '@/lib/services/today-service';
 
 export async function GET(request: NextRequest) {
+  // Fast zero-latency response for guests without Supabase auth cookies
+  const cookieStore = await cookies();
+  const hasAuthCookie = cookieStore.getAll().some((c) => c.name.startsWith('sb-'));
+
+  if (!hasAuthCookie) {
+    return NextResponse.json({
+      hasActiveGoal: false,
+      isGuest: true,
+      goals: [],
+      activeGoal: null,
+      currentMilestone: null,
+      heroTask: null,
+      heroTaskSteps: [],
+      adaptiveSlice: null,
+      remainingWeekTasks: [],
+      threadTasks: [],
+      activeTaskIndex: 0,
+      isWeekDone: false,
+      persona: null,
+      banner: null,
+      todayDayNote: null,
+      streakText: null,
+    });
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

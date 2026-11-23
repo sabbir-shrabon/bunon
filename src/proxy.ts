@@ -47,6 +47,36 @@ export async function proxy(request: NextRequest) {
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
+  // Check if incoming request has any Supabase auth cookie (sb-*)
+  const allCookies = request.cookies.getAll();
+  const hasAuthCookie = allCookies.some((cookie) => cookie.name.startsWith('sb-'));
+
+  const isProtected = protectedPaths.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`)
+  );
+
+  // If NO sb- auth cookie is present:
+  if (!hasAuthCookie) {
+    // For protected routes, immediately redirect to /login?next=<encoded_path> without waiting for Supabase
+    if (isProtected) {
+      const targetPath = sanitizeRedirect(
+        `${pathname}${request.nextUrl.search}`,
+        '/today'
+      );
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      loginUrl.search = `?next=${encodeURIComponent(targetPath)}`;
+      const redirectResponse = NextResponse.redirect(loginUrl);
+      redirectResponse.headers.set('X-Frame-Options', 'DENY');
+      redirectResponse.headers.set('X-Content-Type-Options', 'nosniff');
+      redirectResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+      return redirectResponse;
+    }
+
+    // For public / guest routes, return immediately (0ms, zero Supabase round-trip!)
+    return response;
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -79,10 +109,6 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // Enforce Just-in-Time Auth redirects with strict anti-phishing sanitization
-  const isProtected = protectedPaths.some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`)
-  );
-
   if (!user && isProtected) {
     const targetPath = sanitizeRedirect(
       `${pathname}${request.nextUrl.search}`,

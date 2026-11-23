@@ -65,8 +65,10 @@ export async function getTodayPlan(
 
   const isPaused = activeGoal.status === 'PAUSED';
 
-  // 1. Fetch pending counts for all active goals
-  const goalSummaries = await Promise.all(
+  // 1. Parallelize independent queries: goal summaries, week tasks, milestones, done tasks, recent tasks/evidence, and today's day note
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString();
+
+  const goalSummariesPromise = Promise.all(
     userGoals.map(async (g) => {
       const { count } = await admin
         .from('tasks')
@@ -78,34 +80,64 @@ export async function getTodayPlan(
     })
   );
 
-  // 2. Fetch current week's tasks and milestone positions for active goal
-  const { data: weekTasks } = await admin
+  const weekTasksPromise = admin
     .from('tasks')
     .select('*')
     .eq('goal_id', activeGoal.id)
     .eq('week_number', activeGoal.current_week_number)
     .order('sequence_order', { ascending: true });
 
-  const tasks = (weekTasks || []) as unknown as TaskRow[];
-
-  const { data: allMilestones } = await admin
+  const allMilestonesPromise = admin
     .from('milestones')
-    .select('id, position, title, expected_result, status')
+    .select('*')
     .eq('goal_id', activeGoal.id);
 
-  const milestoneMap = new Map((allMilestones || []).map((m) => [m.id, m]));
-
-  // 3. Fetch completed tasks (earlier + current weeks), ordered oldest -> newest
-  const { data: rawDoneTasks } = await admin
+  const doneTasksPromise = admin
     .from('tasks')
     .select('*')
     .eq('goal_id', activeGoal.id)
     .eq('status', 'DONE')
     .order('completed_at', { ascending: true });
 
-  const doneTasks = (rawDoneTasks || []) as unknown as TaskRow[];
+  const recentTasksPromise = admin
+    .from('tasks')
+    .select('*')
+    .eq('goal_id', activeGoal.id)
+    .gte('created_at', fourteenDaysAgo);
 
-  // 4. Fetch evidence rows with 1-hour signed view URLs for all completed tasks
+  const recentEvidencePromise = admin
+    .from('evidence')
+    .select('*')
+    .eq('user_id', userId)
+    .order('uploaded_at', { ascending: false })
+    .limit(10);
+
+  const todayDayNotePromise = getTodayDayNote(userId, activeGoal.id);
+
+  const [
+    goalSummaries,
+    { data: weekTasks },
+    { data: allMilestones },
+    { data: rawDoneTasks },
+    { data: recentTasks },
+    { data: recentEvidence },
+    todayDayNote,
+  ] = await Promise.all([
+    goalSummariesPromise,
+    weekTasksPromise,
+    allMilestonesPromise,
+    doneTasksPromise,
+    recentTasksPromise,
+    recentEvidencePromise,
+    todayDayNotePromise,
+  ]);
+
+  const tasks = (weekTasks || []) as unknown as TaskRow[];
+  const doneTasks = (rawDoneTasks || []) as unknown as TaskRow[];
+  const milestonesList = (allMilestones || []) as unknown as MilestoneRow[];
+  const milestoneMap = new Map(milestonesList.map((m) => [m.id, m]));
+
+  // 2. Fetch evidence rows with 1-hour signed view URLs for all completed tasks
   const doneTaskIds = doneTasks.map((t) => t.id);
   const evidenceMap = new Map<string, TaskEvidenceItem[]>();
 
@@ -155,7 +187,7 @@ export async function getTodayPlan(
     }
   }
 
-  // 5. Active Hero task: strictly first PENDING task ordered by sequence_order ASC
+  // 3. Active Hero task: strictly first PENDING task ordered by sequence_order ASC
   const pendingTasks = tasks
     .filter((t) => t.status === 'PENDING')
     .sort((a, b) => a.sequence_order - b.sequence_order);
@@ -184,16 +216,14 @@ export async function getTodayPlan(
 
   const remainingWeekTasks = heroTask ? tasks.filter((t) => t.id !== heroTask.id) : tasks;
 
-  // 6. Current milestone
-  const { data: milestone } = heroTask
-    ? await admin.from('milestones').select('*').eq('id', heroTask.milestone_id).maybeSingle()
-    : await admin.from('milestones').select('*').eq('goal_id', activeGoal.id).eq('status', 'ACTIVE').maybeSingle();
+  // 4. Current milestone (resolved synchronously from prefetched milestones)
+  const milestone = (
+    heroTask
+      ? milestonesList.find((m) => m.id === heroTask.milestone_id)
+      : milestonesList.find((m) => m.status === 'ACTIVE') || milestonesList[0]
+  ) || null;
 
-  // 7. Persona profile & Adaptive Slice
-  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString();
-  const { data: recentTasks } = await admin.from('tasks').select('*').eq('goal_id', activeGoal.id).gte('created_at', fourteenDaysAgo);
-  const { data: recentEvidence } = await admin.from('evidence').select('*').eq('user_id', userId).order('uploaded_at', { ascending: false }).limit(10);
-
+  // 5. Persona profile & Adaptive Slice
   const persona = evaluatePersonaProfile({
     scheduledWorkingDays: activeGoal.working_days || [0, 1, 2, 3, 4],
     lastActivityDate: activeGoal.last_activity_date,
@@ -211,7 +241,6 @@ export async function getTodayPlan(
   }
 
   const banner = evaluateContextBanner(activeGoal, persona, isWeekDone, milestone as unknown as MilestoneRow | null);
-  const todayDayNote = await getTodayDayNote(userId, activeGoal.id);
 
   let streakText: string | null = null;
   if (activeGoal.streak_weeks >= 2) {

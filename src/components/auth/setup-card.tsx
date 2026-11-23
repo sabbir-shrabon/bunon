@@ -8,13 +8,12 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { PrimaryButton } from '@/components/ui/primary-button';
 import { createClient } from '@/lib/db/client';
 import { sanitizeRedirect } from '@/lib/security';
 
 export function SetupCard() {
-  const router = useRouter();
   const params = useSearchParams();
   const next = sanitizeRedirect(params.get('next'), '/today');
 
@@ -27,14 +26,14 @@ export function SetupCard() {
 
   useEffect(() => {
     const load = async () => {
-      await fetch('/api/auth/ensure-user', { method: 'POST' });
+      await fetch('/api/auth/ensure-user', { method: 'POST', credentials: 'include' });
       const supabase = createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        router.replace('/login?next=%2Fsetup');
+        window.location.assign('/login?next=%2Fsetup');
         return;
       }
 
@@ -53,12 +52,12 @@ export function SetupCard() {
     };
 
     void load();
-  }, [router]);
+  }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (locked) {
-      router.replace(next);
+      window.location.assign(next);
       return;
     }
 
@@ -78,9 +77,12 @@ export function SetupCard() {
     setBusy(true);
 
     if (currentYear - year < 18) {
-      const response = await fetch('/api/auth/delete-account', { method: 'POST' });
+      const response = await fetch('/api/auth/delete-account', {
+        method: 'POST',
+        credentials: 'include',
+      });
       if (response.ok) {
-        router.replace('/under-18');
+        window.location.assign('/under-18');
       } else {
         setMessage('We could not remove this account. Please try again.');
       }
@@ -106,11 +108,10 @@ export function SetupCard() {
 
     if (error) {
       setMessage(error.message);
+      setBusy(false);
     } else {
-      router.replace(next);
-      router.refresh();
+      window.location.assign(next);
     }
-    setBusy(false);
   };
 
   return (
