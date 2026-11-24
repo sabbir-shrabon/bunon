@@ -11,22 +11,12 @@ export type CoachingTone = 'GENTLE' | 'STRAIGHT' | 'SHORT';
 export type SupportedLanguage = 'EN' | 'BN';
 export type AppTheme = 'LIGHT' | 'DARK';
 
-export type UserState =
-  | 'STEADY'
-  | 'SLIPPING'
-  | 'STRUGGLING'
-  | 'AHEAD'
-  | 'OVERLOADED';
+export type UserState = 'STEADY' | 'SLIPPING' | 'STRUGGLING' | 'AHEAD' | 'OVERLOADED';
 
 export type ExecutionMode = 'deliverable_queue' | 'daily_quota';
 export type PlanStyle = 'FLEXIBLE_WEEK' | 'DAILY_ADAPTIVE';
 
-export type GoalStatus =
-  | 'DRAFT'
-  | 'ACTIVE'
-  | 'PAUSED'
-  | 'COMPLETED'
-  | 'ABANDONED';
+export type GoalStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ABANDONED';
 
 export type GoalVisibility = 'PRIVATE' | 'PUBLIC';
 
@@ -120,10 +110,13 @@ export type RefundReasonCode =
 
 export type RefundStatus = 'OPEN' | 'APPROVED' | 'REJECTED';
 
+export type OutlineMode = 'FOLLOW_OUTLINE' | 'BACKGROUND_CONTEXT';
+
 export type PromptLayer = 'CORE' | 'SKILL' | 'REGIONAL' | 'PIPELINE';
 
 export type AIPipelineKey =
   | 'PIPELINE_1'
+  | 'PIPELINE_1B'
   | 'PIPELINE_2'
   | 'PIPELINE_3'
   | 'PIPELINE_4'
@@ -131,11 +124,7 @@ export type AIPipelineKey =
   | 'PIPELINE_6'
   | 'PIPELINE_7';
 
-export type AICallStatus =
-  | 'SUCCESS'
-  | 'RETRIED_SUCCESS'
-  | 'SCHEMA_FAILED'
-  | 'API_ERROR';
+export type AICallStatus = 'SUCCESS' | 'RETRIED_SUCCESS' | 'SCHEMA_FAILED' | 'API_ERROR';
 
 export type SupportTicketKind = 'SUPPORT' | 'FEEDBACK';
 export type SupportTicketStatus = 'OPEN' | 'REPLIED' | 'CLOSED';

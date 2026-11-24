@@ -7,6 +7,7 @@
 
 'use client';
 
+import React from 'react';
 import { PrimaryButton } from '@/components/ui/primary-button';
 
 interface AllDoneViewProps {
@@ -16,6 +17,8 @@ interface AllDoneViewProps {
   onAdvanceWeek?: () => void;
   onStartTomorrowEarly?: () => void;
   hasUpcomingTasksThisWeek?: boolean;
+  isAdvancingWeek?: boolean;
+  advanceWeekError?: string | null;
 }
 
 export function AllDoneView({
@@ -25,6 +28,8 @@ export function AllDoneView({
   onAdvanceWeek,
   onStartTomorrowEarly,
   hasUpcomingTasksThisWeek = false,
+  isAdvancingWeek = false,
+  advanceWeekError = null,
 }: Readonly<AllDoneViewProps>) {
   return (
     <section className="w-full rounded-[24px] border border-hairline bg-card p-8 text-center flex flex-col items-center">
@@ -34,9 +39,7 @@ export function AllDoneView({
       </div>
 
       <h1 className="text-[22px] font-semibold text-ink leading-snug mb-2">
-        {isWeekQueueDone
-          ? `That is Week ${weekNumber}'s work done`
-          : 'That is today done'}
+        {isWeekQueueDone ? `That is Week ${weekNumber}'s work done` : 'That is today done'}
       </h1>
 
       <p className="text-[14px] text-muted mb-6 max-w-xs leading-relaxed">
@@ -47,9 +50,21 @@ export function AllDoneView({
 
       {isWeekQueueDone && onAdvanceWeek && (
         <div className="w-full max-w-xs mb-3">
-          <PrimaryButton onClick={onAdvanceWeek}>
-            Review Week {weekNumber} &amp; unlock Week {weekNumber + 1}
+          <PrimaryButton onClick={onAdvanceWeek} disabled={isAdvancingWeek}>
+            {isAdvancingWeek ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+                Reviewing Week {weekNumber} &amp; building Week {weekNumber + 1}...
+              </span>
+            ) : (
+              `Review Week ${weekNumber} & unlock Week ${weekNumber + 1}`
+            )}
           </PrimaryButton>
+          {advanceWeekError && (
+            <p className="text-[12px] text-red-600 dark:text-red-400 mt-2 text-center leading-relaxed font-medium">
+              {advanceWeekError}
+            </p>
+          )}
         </div>
       )}
 

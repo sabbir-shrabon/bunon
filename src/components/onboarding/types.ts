@@ -1,27 +1,43 @@
 /**
- * 1. Purpose: Shared types for the multi-step Onboarding wizard state machine.
- * 2. Spec Ref: Category B Screens 10–21 in UI Design Guide.
- * 3. Called By: Onboarding wizard and step components.
- * 4. Calls: ai-schemas.
+ * 1. Purpose: Shared types for the multi-step Onboarding wizard state machine (Two-Path Onboarding).
+ * 2. Spec Ref: Category B Screens 10a–21 in UI Design Guide & Master Build Plan v2.5.
+ * 3. Called By: Onboarding wizard, step components, useOnboardingWizard hook.
+ * 4. Calls: ai-schemas, domain.
  */
 
-import type { Pipeline1Output, Pipeline2Output } from '@/types/ai-schemas';
+import type { Pipeline1Output, Pipeline1BOutput, Pipeline2Output } from '@/types/ai-schemas';
+import type { OutlineMode } from '@/types/domain';
+
+export type OnboardingStep =
+  | 'CHOOSE_PATH_10A'
+  | 'FILE_CONTEXT_10B'
+  | 'Q1_GOAL_WHY'
+  | 'Q2_DEADLINE'
+  | 'Q3_WORKING_DAYS'
+  | 'Q4_BASELINE'
+  | 'Q5_CONSTRAINTS'
+  | 'LOADING_FOLLOWUPS'
+  | 'SAFETY'
+  | 'CONFIRM_CATEGORY'
+  | 'AI_FOLLOWUPS'
+  | 'LOADING_ROADMAP'
+  | 'ROADMAP_PREVIEW'
+  | 'CHOOSE_WEEKLY_STYLE'
+  | 'ERROR_STATE_21';
+
+export type OnboardingEntryPath = 'QUESTIONS' | 'FILE_NOTES';
 
 export interface OnboardingState {
-  step:
-    | 'Q1_GOAL_WHY'
-    | 'Q2_DEADLINE'
-    | 'Q3_WORKING_DAYS'
-    | 'Q4_BASELINE'
-    | 'Q5_CONSTRAINTS'
-    | 'LOADING_FOLLOWUPS'
-    | 'SAFETY'
-    | 'CONFIRM_CATEGORY'
-    | 'AI_FOLLOWUPS'
-    | 'LOADING_ROADMAP'
-    | 'ROADMAP_PREVIEW'
-    | 'CHOOSE_WEEKLY_STYLE'
-    | 'ERROR_STATE_21';
+  step: OnboardingStep;
+  entryPath: OnboardingEntryPath;
+
+  // File / Notes Context (Two-Path Onboarding)
+  attachedFile: File | null;
+  pastedNotes: string;
+  outlineMode: OutlineMode;
+  extractedOutlineSummary: string;
+  confirmedMemoryFacts: Array<{ scope: 'PERSON' | 'GOAL'; bucket: string; fact: string }>;
+  pipeline1BOutput: Pipeline1BOutput | null;
 
   // Fixed Basics
   goalTitle: string;

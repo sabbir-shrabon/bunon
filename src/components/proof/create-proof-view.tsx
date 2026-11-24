@@ -2,12 +2,12 @@
  * 1. Purpose: Screen 40 (Create proof) client view matching create_proof Stitch design faithfully.
  * 2. Spec Ref: Stitch create_proof code.html & screen.png & Category D Screens 39-49.
  * 3. Called By: /proof/create page.
- * 4. Calls: CameraModal, LinkSheet, ProofLimitSheet, ProofPreviewCard, ProofAddGrid, EffortCheckinCard, compressPhoto.
+ * 4. Calls: CameraModal, LinkSheet, ProofLimitSheet, ProofPreviewCard, ProofAddGrid, EffortCheckinCard, uploadProofPhoto.
  */
 
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { CameraModal } from './camera-modal';
 import { LinkSheet } from './link-sheet';
@@ -16,8 +16,8 @@ import { ProofPreviewCard } from './proof-preview-card';
 import { ProofAddGrid } from './proof-add-grid';
 import { EffortCheckinCard } from './effort-checkin-card';
 import { compressPhoto } from './compress-photo';
+import { uploadProofPhoto } from './upload-proof-photo';
 import { PrimaryButton } from '@/components/ui/primary-button';
-import { createClient } from '@/lib/db/client';
 
 interface CreateProofViewProps {
   taskId: string;
@@ -44,11 +44,36 @@ export function CreateProofView({
   const [isEffortDismissed, setIsEffortDismissed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showDonePop, setShowDonePop] = useState(false);
 
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isLinkSheetOpen, setIsLinkSheetOpen] = useState(false);
   const [limitSheetType, setLimitSheetType] = useState<'PHOTO_LIMIT_47' | 'PRO_LOCKED_48' | 'STORAGE_FULL_119' | null>(null);
+
+  const clearProofState = useCallback(() => {
+    setPhotoPreviewUrl((prev) => {
+      if (prev) { try { URL.revokeObjectURL(prev); } catch {} }
+      return null;
+    });
+    setPhotoBlob(null);
+    setPhotoFileName('');
+    setPhotoSizeBytes(0);
+    setLinkUrl(null);
+    setCaption('');
+    setEffortRating(null);
+    setIsEffortDismissed(false);
+    setIsSubmitting(false);
+    setErrorMessage(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    try {
+      sessionStorage.removeItem('camera_capture_cache');
+      sessionStorage.removeItem('proof_draft_cache');
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    clearProofState();
+    return () => clearProofState();
+  }, [taskId, clearProofState]);
 
   const handlePhotoCompressed = async (file: Blob, name: string) => {
     const compressed = await compressPhoto(file);
@@ -71,80 +96,18 @@ export function CreateProofView({
       let storagePath: string | undefined;
 
       if (photoBlob) {
-        const mimeType = photoBlob.type || 'image/jpeg';
-        const fileSizeBytes = photoSizeBytes || photoBlob.size || 0;
-        const uploadRes = await fetch(`/api/tasks/${taskId}/evidence/upload-url`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileName: photoFileName || 'proof.jpg',
-            mimeType,
-            fileSizeBytes,
-            type: 'PHOTO',
-            proofType: 'PHOTO',
-          }),
-        });
-        const uploadData = await uploadRes.json();
-
-        if (!uploadRes.ok) {
-          if (uploadData.error === 'DAILY_PHOTO_LIMIT') {
-            setLimitSheetType('PHOTO_LIMIT_47');
-            return;
-          }
-          if (uploadData.error === 'STORAGE_FULL') {
-            setLimitSheetType('STORAGE_FULL_119');
-            return;
-          }
-          if (uploadData.error === 'PRO_REQUIRED') {
-            setLimitSheetType('PRO_LOCKED_48');
-            return;
-          }
-          setErrorMessage(uploadData.message || uploadData.error || 'Failed to initialize photo upload');
+        const uploadResult = await uploadProofPhoto(taskId, photoBlob, photoFileName, photoSizeBytes);
+        if (uploadResult.errorType) {
+          setLimitSheetType(uploadResult.errorType);
+          setIsSubmitting(false);
           return;
         }
-
-        const targetPath = uploadData.path || uploadData.storagePath;
-        if (!targetPath) {
-          setErrorMessage('Photo upload failed: missing storage path');
+        if (uploadResult.errorMessage || !uploadResult.storagePath) {
+          setErrorMessage(uploadResult.errorMessage || 'Photo upload failed');
+          setIsSubmitting(false);
           return;
         }
-
-        if (uploadData.token) {
-          const supabase = createClient();
-          const { error: uploadError } = await supabase.storage
-            .from('bunon-proofs')
-            .uploadToSignedUrl(targetPath, uploadData.token, photoBlob, {
-              contentType: mimeType,
-              upsert: true,
-            });
-
-          if (uploadError) {
-            console.error('[proof storage upload error]', uploadError);
-            setErrorMessage(`Could not save photo to storage: ${uploadError.message}`);
-            return;
-          }
-        } else if (uploadData.signedUrl) {
-          const putRes = await fetch(uploadData.signedUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': mimeType },
-            body: photoBlob,
-          });
-
-          if (!putRes.ok) {
-            setErrorMessage(`Could not save photo to storage (${putRes.status}: ${putRes.statusText || 'Upload failed'})`);
-            return;
-          }
-        } else {
-          setErrorMessage('Photo upload failed: missing upload token or signed URL');
-          return;
-        }
-
-        storagePath = targetPath;
-      }
-
-      if (photoBlob && !storagePath) {
-        setErrorMessage('Cannot complete task: photo upload failed to produce a valid storage path');
-        return;
+        storagePath = uploadResult.storagePath;
       }
 
       const proofType = photoBlob ? 'PHOTO' : linkUrl ? 'LINK' : 'NOTE';
@@ -164,18 +127,15 @@ export function CreateProofView({
       if (!completeRes.ok) {
         const err = await completeRes.json().catch(() => ({}));
         setErrorMessage(err.message || err.error || 'Could not complete task');
+        setIsSubmitting(false);
         return;
       }
 
-      setShowDonePop(true);
-      setTimeout(() => {
-        router.push(`/today?completed=${taskId}`);
-        router.refresh();
-      }, 500);
+      clearProofState();
+      router.push(`/today?completed=${taskId}`);
+      router.refresh();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Network error while saving proof';
-      setErrorMessage(msg);
-    } finally {
+      setErrorMessage(err instanceof Error ? err.message : 'Network error while saving proof');
       setIsSubmitting(false);
     }
   };
@@ -193,28 +153,10 @@ export function CreateProofView({
         }}
       />
 
-      {showDonePop && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs">
-          <div className="flex flex-col items-center animate-in fade-in zoom-in-75 duration-300">
-            <div className="w-16 h-16 rounded-full bg-[var(--marigold)] text-white flex items-center justify-center text-[28px] shadow-lg">
-              ✓
-            </div>
-            <span className="mt-3 text-white text-[16px] font-semibold">Saved & Finished</span>
-          </div>
-        </div>
-      )}
-
       <header className="fixed top-0 inset-x-0 z-40 bg-card/90 backdrop-blur-md border-b border-hairline/60 pt-safe">
         <div className="h-14 px-4 flex items-center justify-between max-w-[640px] mx-auto">
-          <button
-            type="button"
-            aria-label="Go back"
-            onClick={() => router.back()}
-            className="w-10 h-10 -ml-2 flex items-center justify-center text-ink hover:text-muted transition-colors cursor-pointer"
-          >
-            <svg className="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
-              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
-            </svg>
+          <button type="button" aria-label="Go back" onClick={() => router.back()} className="w-10 h-10 -ml-2 flex items-center justify-center text-ink hover:text-muted transition-colors cursor-pointer">
+            <svg className="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
           </button>
           <h1 className="text-[17px] font-semibold text-ink text-center flex-1 px-2 truncate">Create Proof</h1>
           <div className="w-10" />
@@ -227,12 +169,8 @@ export function CreateProofView({
         </div>
 
         <ProofPreviewCard
-          photoPreviewUrl={photoPreviewUrl}
-          photoFileName={photoFileName}
-          photoSizeBytes={photoSizeBytes}
-          linkUrl={linkUrl}
-          onRemovePhoto={() => { setPhotoBlob(null); setPhotoPreviewUrl(null); }}
-          onRemoveLink={() => setLinkUrl(null)}
+          photoPreviewUrl={photoPreviewUrl} photoFileName={photoFileName} photoSizeBytes={photoSizeBytes} linkUrl={linkUrl}
+          onRemovePhoto={() => { setPhotoBlob(null); setPhotoPreviewUrl(null); }} onRemoveLink={() => setLinkUrl(null)}
         />
 
         <div className="w-full bg-card rounded-[20px] border border-hairline/60 p-5 flex flex-col">
@@ -259,11 +197,7 @@ export function CreateProofView({
         />
 
         {!isEffortDismissed && (
-          <EffortCheckinCard
-            effortRating={effortRating}
-            onSelectRating={setEffortRating}
-            onDismiss={() => setIsEffortDismissed(true)}
-          />
+          <EffortCheckinCard effortRating={effortRating} onSelectRating={setEffortRating} onDismiss={() => setIsEffortDismissed(true)} />
         )}
 
         {errorMessage && (
@@ -282,30 +216,14 @@ export function CreateProofView({
       </aside>
 
       <CameraModal
-        isOpen={isCameraOpen}
-        onClose={() => setIsCameraOpen(false)}
+        isOpen={isCameraOpen} onClose={() => setIsCameraOpen(false)}
         onCapture={(blob, previewUrl) => {
-          setPhotoBlob(blob);
-          setPhotoSizeBytes(blob.size);
-          setPhotoFileName('camera_snapshot.jpg');
-          setPhotoPreviewUrl(previewUrl);
-          setLinkUrl(null);
-          setIsCameraOpen(false);
+          setPhotoBlob(blob); setPhotoSizeBytes(blob.size); setPhotoFileName('camera_snapshot.jpg');
+          setPhotoPreviewUrl(previewUrl); setLinkUrl(null); setIsCameraOpen(false);
         }}
       />
-
-      <LinkSheet
-        isOpen={isLinkSheetOpen}
-        onClose={() => setIsLinkSheetOpen(false)}
-        onAddLink={(url) => { setLinkUrl(url); setPhotoBlob(null); setPhotoPreviewUrl(null); }}
-      />
-
-      <ProofLimitSheet
-        isOpen={Boolean(limitSheetType)}
-        type={limitSheetType || 'PHOTO_LIMIT_47'}
-        onClose={() => setLimitSheetType(null)}
-        onUseNoteOrLink={() => setLimitSheetType(null)}
-      />
+      <LinkSheet isOpen={isLinkSheetOpen} onClose={() => setIsLinkSheetOpen(false)} onAddLink={(url) => { setLinkUrl(url); setPhotoBlob(null); setPhotoPreviewUrl(null); }} />
+      <ProofLimitSheet isOpen={Boolean(limitSheetType)} type={limitSheetType || 'PHOTO_LIMIT_47'} onClose={() => setLimitSheetType(null)} onUseNoteOrLink={() => setLimitSheetType(null)} />
     </div>
   );
 }

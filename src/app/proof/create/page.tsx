@@ -7,6 +7,7 @@
 
 import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
+import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
 import { CreateProofView } from '@/components/proof/create-proof-view';
@@ -16,6 +17,7 @@ interface PageProps {
 }
 
 async function CreateProofContent({ searchParams }: PageProps) {
+  await connection();
   const supabase = await createClient();
   const {
     data: { user },
@@ -51,6 +53,7 @@ async function CreateProofContent({ searchParams }: PageProps) {
 
   return (
     <CreateProofView
+      key={task.id}
       taskId={task.id}
       taskTitle={task.title}
       isPro={isPro}

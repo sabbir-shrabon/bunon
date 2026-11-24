@@ -37,6 +37,8 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
   const [isDayNoteOpen, setIsDayNoteOpen] = useState(false);
   const [isGoalSwitcherOpen, setIsGoalSwitcherOpen] = useState(false);
   const [isWeekPlanOpen, setIsWeekPlanOpen] = useState(false);
+  const [isAdvancingWeek, setIsAdvancingWeek] = useState(false);
+  const [advanceWeekError, setAdvanceWeekError] = useState<string | null>(null);
 
   useEffect(() => {
     setData(initialData);
@@ -51,10 +53,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
       if (foundIdx >= 0) {
         setFocusedIndex(foundIdx);
         setCompletedToast('Proof saved · Task marked done!');
-        const timer = setTimeout(() => {
-          setFocusedIndex(data.activeTaskIndex);
-          router.replace('/today');
-        }, 600);
+        const timer = setTimeout(() => { setFocusedIndex(data.activeTaskIndex); router.replace('/today'); }, 600);
         return () => clearTimeout(timer);
       }
     }
@@ -64,8 +63,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
 
   const reloadPlan = async (goalId?: string) => {
     const targetId = goalId || data.activeGoal?.id;
-    const url = targetId ? `/api/today?goalId=${targetId}` : '/api/today';
-    const res = await fetch(url);
+    const res = await fetch(targetId ? `/api/today?goalId=${targetId}` : '/api/today');
     if (res.ok) {
       const updated: TodayPlanResponse = await res.json();
       setData(updated);
@@ -83,9 +81,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
     });
     if (res.ok) {
       const resJson = await res.json();
-      if (resJson.howToSteps?.steps) {
-        setData((prev) => ({ ...prev, heroTaskSteps: resJson.howToSteps.steps as SubStepItem[] }));
-      }
+      if (resJson.howToSteps?.steps) setData((prev) => ({ ...prev, heroTaskSteps: resJson.howToSteps.steps as SubStepItem[] }));
     }
   };
 
@@ -127,17 +123,27 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
   };
 
   const handleAdvanceWeek = async () => {
-    if (!data.activeGoal) return;
-    const res = await fetch('/api/weeks/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goalId: data.activeGoal.id }),
-    });
-    if (res.ok) {
-      const result = await res.json();
-      if (result.isGoalCompleted && result.journeyCardSlug) router.push(`/journey/${result.journeyCardSlug}`);
-      else if (result.weeklyReviewId) router.push(`/weekly-summary/${result.weeklyReviewId}`);
-      else await reloadPlan();
+    if (!data.activeGoal || isAdvancingWeek) return;
+    setIsAdvancingWeek(true);
+    setAdvanceWeekError(null);
+    try {
+      const res = await fetch('/api/weeks/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goalId: data.activeGoal.id }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.isGoalCompleted && result.journeyCardSlug) router.push(`/journey/${result.journeyCardSlug}`);
+        else if (result.weeklyReviewId) router.push(`/weekly-summary/${result.weeklyReviewId}`);
+        else await reloadPlan();
+      } else {
+        setAdvanceWeekError("Bunon's AI is momentarily busy. Your progress is safe — please tap to try again.");
+      }
+    } catch {
+      setAdvanceWeekError("Bunon's AI is momentarily busy. Your progress is safe — please tap to try again.");
+    } finally {
+      setIsAdvancingWeek(false);
     }
   };
 
@@ -157,11 +163,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
         <div className="flex flex-col w-full max-w-[428px] md:max-w-[640px] mx-auto px-4 pt-3 pb-8">
           {/* Header Row */}
           <div className="flex justify-between items-center mb-3 px-1 text-muted text-[13px] font-medium">
-            <button
-              type="button"
-              onClick={() => setIsGoalSwitcherOpen(true)}
-              className="flex items-center gap-1 text-ink hover:text-muted transition-colors cursor-pointer"
-            >
+            <button type="button" onClick={() => setIsGoalSwitcherOpen(true)} className="flex items-center gap-1 text-ink hover:text-muted transition-colors cursor-pointer">
               <span>{data.activeGoal.title}</span>
               <span className="text-[14px]">▾</span>
             </button>
@@ -207,18 +209,20 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
 
               {data.isWeekDone && (
                 <div className="pt-2">
-                  <AllDoneView isWeekQueueDone={true} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} />
+                  <AllDoneView isWeekQueueDone={true} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceWeekError={advanceWeekError} />
                 </div>
               )}
 
-              <div className="pt-3 flex justify-center">
-                <button type="button" onClick={() => setIsDayNoteOpen(true)} className="text-muted hover:text-ink transition-colors font-medium text-[13px] cursor-pointer py-1">
-                  + Add a day note
-                </button>
-              </div>
+              {!data.isWeekDone && (
+                <div className="pt-3 flex justify-center">
+                  <button type="button" onClick={() => setIsDayNoteOpen(true)} className="text-muted hover:text-ink transition-colors font-medium text-[13px] cursor-pointer py-1">
+                    + Add a day note
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
-            <AllDoneView isWeekQueueDone={data.isWeekDone} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} />
+            <AllDoneView isWeekQueueDone={data.isWeekDone} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceWeekError={advanceWeekError} />
           )}
         </div>
       </main>

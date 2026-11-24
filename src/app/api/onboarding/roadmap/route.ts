@@ -38,6 +38,10 @@ export async function POST(request: NextRequest) {
     goalCategory: string;
     executionMode: 'deliverable_queue' | 'daily_quota';
     planStyle: 'FLEXIBLE_WEEK' | 'DAILY_ADAPTIVE';
+    outlineMode?: 'FOLLOW_OUTLINE' | 'BACKGROUND_CONTEXT';
+    outline_mode?: 'FOLLOW_OUTLINE' | 'BACKGROUND_CONTEXT';
+    extractedOutlineSummary?: string;
+    extracted_outline_summary?: string;
     deadlineDate: string;
     totalWeeks: number;
     workingDays: number[];
@@ -101,6 +105,8 @@ export async function POST(request: NextRequest) {
           goal_category: body.goalCategory,
           execution_mode: body.executionMode,
           plan_style: body.planStyle,
+          outline_mode: body.outlineMode || body.outline_mode || 'BACKGROUND_CONTEXT',
+          extracted_outline_summary: body.extractedOutlineSummary || body.extracted_outline_summary || '',
           deadline_date: body.deadlineDate,
           total_weeks: body.totalWeeks,
           working_days: body.workingDays.join(','),

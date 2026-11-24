@@ -8,11 +8,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { PrimaryButton } from '@/components/ui/primary-button';
 import { Sheet19Feasibility } from '@/components/onboarding/sheet-19-feasibility';
 import { SheetAdjustRoadmap } from '@/components/onboarding/sheet-adjust-roadmap';
+import { UnderstoodFactsCard, type EditableMemoryFact } from '@/components/onboarding/understood-facts-card';
 import type { Pipeline2Output } from '@/types/ai-schemas';
 
 interface RoadmapPreviewProps {
@@ -23,6 +23,8 @@ interface RoadmapPreviewProps {
   currentRoadmap: Pipeline2Output;
   previousRoadmap: Pipeline2Output | null;
   activePlan: 'A' | 'B';
+  confirmedMemoryFacts?: EditableMemoryFact[];
+  onChangeConfirmedMemoryFacts?: (facts: EditableMemoryFact[]) => void;
   onSwitchPlan: (plan: 'A' | 'B') => void;
   onRegenerate: (reason: string, notes?: string) => Promise<void>;
   onLockRoadmap: () => void;
@@ -37,6 +39,8 @@ export function Screen17RoadmapPreview({
   currentRoadmap,
   previousRoadmap,
   activePlan,
+  confirmedMemoryFacts = [],
+  onChangeConfirmedMemoryFacts = () => {},
   onSwitchPlan,
   onRegenerate,
   onLockRoadmap,
@@ -121,16 +125,10 @@ export function Screen17RoadmapPreview({
             <span>{totalWeeks} weeks · ~{Math.round(totalRequiredHours)} hours</span>
           </div>
 
-          <Link
-            href="/what-bunon-knows"
-            className="flex items-center justify-between p-3 rounded-2xl bg-card border border-hairline text-xs text-ink hover:border-ink transition-colors"
-          >
-            <span className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-muted" />
-              <span>Built using {currentRoadmap.used_context_ids?.length || 4} things Bunon knows about you</span>
-            </span>
-            <span className="text-muted font-medium">View &rarr;</span>
-          </Link>
+          <UnderstoodFactsCard
+            facts={confirmedMemoryFacts}
+            onChangeFacts={onChangeConfirmedMemoryFacts}
+          />
         </div>
 
         <div className="relative flex flex-col gap-4 pl-6 before:content-[''] before:absolute before:left-2.5 before:top-4 before:bottom-4 before:w-[1.5px] before:bg-hairline">

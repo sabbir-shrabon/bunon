@@ -8,11 +8,13 @@ import React, { Suspense } from 'react';
 
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { getUserGoals } from '@/lib/services/journey-service';
 import { AppShell } from '@/components/shell/app-shell';
 
 async function GoalsContent() {
+  await connection();
   const supabase = await createClient();
   const {
     data: { user },

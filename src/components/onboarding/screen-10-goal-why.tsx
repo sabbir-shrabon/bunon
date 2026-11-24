@@ -21,10 +21,12 @@ export function Screen10GoalWhy({
   initialGoal,
   initialWhy,
   onContinue,
+  onBack,
 }: Readonly<{
   initialGoal: string;
   initialWhy: string;
   onContinue: (goal: string, why: string) => void;
+  onBack?: () => void;
 }>) {
   const [goal, setGoal] = useState(initialGoal);
   const [why, setWhy] = useState(initialWhy);
@@ -46,7 +48,7 @@ export function Screen10GoalWhy({
   return (
     <div className="min-h-screen bg-page text-ink flex flex-col">
       <div className="w-full max-w-[580px] mx-auto px-4 py-4 md:py-8 flex flex-col flex-1 pb-32">
-        <StepHeader part={1} />
+        <StepHeader part={1} onBack={onBack} />
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-4">
           {/* Main Focus Card */}

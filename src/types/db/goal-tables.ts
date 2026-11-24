@@ -22,6 +22,7 @@ import type {
   TaskSkipReason,
   HowToStepsData,
   DayTimeMap,
+  OutlineMode,
 } from '../domain';
 
 export interface GoalRow {
@@ -32,6 +33,8 @@ export interface GoalRow {
   category: string;
   execution_mode: ExecutionMode;
   plan_style: PlanStyle;
+  outline_mode: OutlineMode;
+  extracted_outline_summary: string | null;
   streak_weeks: number;
   current_week_number: number;
   last_activity_date: string | null;

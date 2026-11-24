@@ -25,6 +25,10 @@ export interface PromptAssemblyContext {
   category?: string;
   variables: Record<string, string | number | boolean | unknown>;
   responseSchema?: Record<string, unknown>;
+  inlineParts?: Array<{
+    mimeType: string;
+    data: string;
+  }>;
 }
 
 export function renderVariables(
@@ -41,13 +45,30 @@ export function renderVariables(
 
 function calculateCostUsd(tokensIn: number, tokensOut: number, model: string): number {
   const isLite = model.includes('lite');
-  const rateIn = isLite ? 0.075 / 1000000 : 0.15 / 1000000;
-  const rateOut = isLite ? 0.3 / 1000000 : 0.6 / 1000000;
-  return tokensIn * rateIn + tokensOut * rateOut;
+  return (tokensIn * (isLite ? 0.075 : 0.15) + tokensOut * (isLite ? 0.3 : 0.6)) / 1e6;
+}
+
+function getAlternateModel(model: string): string {
+  return model.includes('lite') ? 'gemini-3.8-flash' : 'gemini-3.5-flash-lite';
+}
+
+function isTransientError(err: unknown): boolean {
+  if (!err) return false;
+  const status = typeof err === 'object' && err !== null ? (err as Record<string, unknown>).status : undefined;
+  if (status === 503 || status === 429 || status === '503' || status === '429') return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes('503') ||
+    msg.includes('429') ||
+    msg.includes('UNAVAILABLE') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('overloaded')
+  );
 }
 
 const DEFAULT_PIPELINE_PROMPTS: Record<AIPipelineKey, string> = {
   PIPELINE_1: 'Analyze goal {{goal_title}} in category {{detected_category}}. Ask up to 3 follow-up questions.',
+  PIPELINE_1B: 'Extract goal brief and memory facts from notes or file: {{pasted_or_extracted_text}}.',
   PIPELINE_2: 'Generate 4-8 milestones for {{goal_title}} (baseline: {{current_baseline}}).',
   PIPELINE_3: 'Generate week {{week_number}} tasks for {{goal_title}} under active milestone {{active_milestone_json}}.',
   PIPELINE_4: 'Adapt tasks for {{goal_title}} given trigger {{trigger_type}} and stuck reason {{stuck_reason}}.',
@@ -66,7 +87,6 @@ export async function executeAIPipeline<T>(
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // 1. Fetch active prompt versions for the 4 layers
   const pipelineKey = `${ctx.pipeline}_` as string;
   const { data: prompts } = await admin
     .from('prompt_versions')
@@ -111,28 +131,22 @@ export async function executeAIPipeline<T>(
     user_country: ctx.country || 'BD',
   };
 
-  const systemInstruction = [
-    renderVariables(coreIdentity, allVars),
-    renderVariables(coreLang, allVars),
-    renderVariables(skillText, allVars),
-    renderVariables(regionalText, allVars),
-  ]
+  const systemInstruction = [coreIdentity, coreLang, skillText, regionalText]
+    .map((t) => renderVariables(t, allVars))
     .filter(Boolean)
     .join('\n\n---\n\n');
 
   const userContent = renderVariables(pipelineText, allVars);
   const rawModel = ctx.model || 'gemini-3.5-flash-lite';
-  const model =
+  let activeModel =
     rawModel.includes('2.5') || rawModel.includes('2.0') || rawModel.includes('1.5')
       ? 'gemini-3.5-flash-lite'
       : rawModel;
 
   const rawSchema = ctx.responseSchema || pipelinePromptRow?.locked_output_schema_json || undefined;
-  const hasValidSchema =
-    rawSchema &&
-    typeof rawSchema === 'object' &&
-    Object.keys(rawSchema).length > 0 &&
-    (rawSchema as Record<string, unknown>).type;
+  const hasValidSchema = Boolean(
+    rawSchema && typeof rawSchema === 'object' && (rawSchema as Record<string, unknown>).type
+  );
 
   const startTime = Date.now();
   let tokensIn = 0;
@@ -141,27 +155,63 @@ export async function executeAIPipeline<T>(
   let validatedOutput: T | null = null;
   let lastError: Error | null = null;
 
+  const logAiCall = async (status: 'SUCCESS' | 'SCHEMA_FAILED', errorCode?: string) => {
+    await admin.from('ai_calls').insert({
+      user_id: ctx.userId ?? null,
+      goal_id: ctx.goalId ?? null,
+      pipeline: ctx.pipeline,
+      prompt_version_id: promptVersionId || '00000000-0000-0000-0000-000000000000',
+      model_name: activeModel,
+      tokens_in: tokensIn,
+      tokens_out: tokensOut,
+      cost_usd: calculateCostUsd(tokensIn, tokensOut, activeModel),
+      latency_ms: Date.now() - startTime,
+      status,
+      ...(errorCode ? { error_code: errorCode.slice(0, 80) } : {}),
+    });
+  };
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const contents =
+      const textPrompt =
         attempt === 1
           ? userContent
           : `${userContent}\n\nCRITICAL FIX: The previous attempt failed validation: ${lastError?.message}. Return valid JSON strictly matching the required schema.`;
+
+      const contents =
+        ctx.inlineParts && ctx.inlineParts.length > 0
+          ? [{ text: textPrompt }, ...ctx.inlineParts.map((p) => ({ inlineData: { mimeType: p.mimeType, data: p.data } }))]
+          : textPrompt;
 
       const genConfig: Record<string, unknown> = {
         systemInstruction,
         responseMimeType: 'application/json',
         temperature: 0.2,
+        ...(hasValidSchema ? { responseJsonSchema: rawSchema } : {}),
       };
-      if (hasValidSchema) {
-        genConfig.responseJsonSchema = rawSchema;
-      }
 
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: genConfig,
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: activeModel,
+          contents,
+          config: genConfig,
+        });
+      } catch (genErr) {
+        if (isTransientError(genErr)) {
+          const fallback = getAlternateModel(activeModel);
+          console.warn(`[Bunon AI] ${activeModel} hit 503/429; retrying on ${fallback} after 800ms`);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          activeModel = fallback;
+          response = await ai.models.generateContent({
+            model: activeModel,
+            contents,
+            config: genConfig,
+          });
+        } else {
+          throw genErr;
+        }
+      }
 
       rawResponseText = response.text || '';
       tokensIn += response.usageMetadata?.promptTokenCount || 0;
@@ -178,47 +228,19 @@ export async function executeAIPipeline<T>(
       }
       console.error('[Bunon AI]', {
         pipeline: ctx.pipeline,
-        model,
+        model: activeModel,
         status: attempt === 1 ? 'ATTEMPT_1_FAILED' : 'SCHEMA_FAILED',
         error: lastError.message,
         ...(zodIssues ? { zodIssues } : {}),
       });
 
       if (attempt === 2) {
-        const latencyMs = Date.now() - startTime;
-        const costUsd = calculateCostUsd(tokensIn, tokensOut, model);
-        await admin.from('ai_calls').insert({
-          user_id: ctx.userId ?? null,
-          goal_id: ctx.goalId ?? null,
-          pipeline: ctx.pipeline,
-          prompt_version_id: promptVersionId || '00000000-0000-0000-0000-000000000000',
-          model_name: model,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          cost_usd: costUsd,
-          latency_ms: latencyMs,
-          status: 'SCHEMA_FAILED',
-          error_code: lastError.message.slice(0, 80),
-        });
+        await logAiCall('SCHEMA_FAILED', lastError.message);
         throw lastError;
       }
     }
   }
 
-  const latencyMs = Date.now() - startTime;
-  const costUsd = calculateCostUsd(tokensIn, tokensOut, model);
-  await admin.from('ai_calls').insert({
-    user_id: ctx.userId ?? null,
-    goal_id: ctx.goalId ?? null,
-    pipeline: ctx.pipeline,
-    prompt_version_id: promptVersionId || '00000000-0000-0000-0000-000000000000',
-    model_name: model,
-    tokens_in: tokensIn,
-    tokens_out: tokensOut,
-    cost_usd: costUsd,
-    latency_ms: latencyMs,
-    status: 'SUCCESS',
-  });
-
+  await logAiCall('SUCCESS');
   return validatedOutput as T;
 }

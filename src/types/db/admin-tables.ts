@@ -147,6 +147,8 @@ export interface SystemSettingsRow {
   max_monthly_referral_days: number;
   free_roadmap_allowance: number;
   pro_roadmap_allowance: number;
+  onboarding_context_max_files: number;
+  onboarding_context_max_file_size_bytes: number;
   updated_at: string;
 }
 

@@ -7,6 +7,7 @@
 
 import React, { Suspense } from 'react';
 import { redirect } from 'next/navigation';
+import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { getWhatBunonKnows } from '@/lib/services/context-service';
 import { WhatBunonKnowsView } from '@/components/what-bunon-knows/what-bunon-knows-view';
@@ -16,6 +17,7 @@ interface PageProps {
 }
 
 async function WhatBunonKnowsContent({ searchParams }: PageProps) {
+  await connection();
   const supabase = await createClient();
   const {
     data: { user },

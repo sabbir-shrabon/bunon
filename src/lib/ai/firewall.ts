@@ -43,6 +43,7 @@ export interface FirewallCheckParams {
     goalWhy?: string;
     answers?: string[];
     dayNote?: string;
+    pastedText?: string;
   };
   isRetry?: boolean;
 }
@@ -57,6 +58,7 @@ export interface FirewallDecision {
     goalWhy?: string;
     answers?: string[];
     dayNote?: string;
+    pastedText?: string;
   };
 }
 
@@ -98,6 +100,9 @@ export async function checkAIFirewall(
     }
     if (params.inputs.dayNote) {
       sanitized.dayNote = sanitizeAndWrapInput(params.inputs.dayNote, 500);
+    }
+    if (params.inputs.pastedText) {
+      sanitized.pastedText = sanitizeAndWrapInput(params.inputs.pastedText, 8000);
     }
   }
 

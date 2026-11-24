@@ -117,3 +117,10 @@ export type RefundRequestInsert = Omit<Partial<RefundRequestRow>, 'id' | 'create
 };
 
 export type RefundRequestUpdate = Partial<Omit<RefundRequestRow, 'id' | 'payment_id' | 'user_id' | 'created_at'>>;
+
+export interface OnboardingContextLimits {
+  maxFiles: number;
+  maxFileSizeBytes: number;
+}
+
+export type { SystemSettingsRow, SystemSettingsUpdate } from './admin-tables';

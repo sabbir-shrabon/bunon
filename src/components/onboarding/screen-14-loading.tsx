@@ -12,14 +12,17 @@ import { ThreadNode } from '@/components/ui/thread-node';
 
 interface LoadingScreenProps {
   goalTitle: string;
-  stage: 'followups' | 'roadmap' | 'locking';
+  stage: 'followups' | 'roadmap' | 'locking' | 'context_ingest';
 }
 
 export function Screen14Loading({ goalTitle, stage }: LoadingScreenProps) {
   let title = `Reading your answers about ${goalTitle || 'your goal'}...`;
   let subtitle = 'Identifying key milestones and weekly pacing tailored to your rhythm.';
 
-  if (stage === 'roadmap') {
+  if (stage === 'context_ingest') {
+    title = 'Reading your plan & outline...';
+    subtitle = 'Extracting your milestones, baseline, and pacing without storing your file.';
+  } else if (stage === 'roadmap') {
     title = `Building your milestone roadmap for ${goalTitle || 'your goal'}...`;
     subtitle = 'Checking your working days, estimated hours, and required deliverables.';
   } else if (stage === 'locking') {
