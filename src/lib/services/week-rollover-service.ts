@@ -1,118 +1,26 @@
 import 'server-only';
 /**
- * 1. Purpose: Domain service for Pipeline 7 (Goal completion & Journey Card) and Pipeline 3 (Week rollover).
- * 2. Spec Ref: UI Design Guide Category H Screens 97-103, Category C Screen 37, and Pipelines 3, 7.
- * 3. Called By: week-service.ts advanceWeek.
- * 4. Calls: Admin Supabase client, Pipeline 7, Pipeline 3, and firewall.
+ * 1. Purpose: Idempotent domain service for Pipeline 3 Week N+1 planning and rollover execution.
+ * 2. Spec Ref: UI Design Guide Category C Screen 37 and Pipeline 3 / Pipeline 7.
+ * 3. Called By: /api/weeks/plan-next and week-service.ts advanceWeek.
+ * 4. Calls: Admin Supabase client, Pipeline 3, goal-completion.service, and AI firewall.
  */
 
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
-import {
-  Pipeline3WeeklyPlannerSchema,
-  Pipeline7NextGoalBridgeSchema,
-  type Pipeline3Output,
-  type Pipeline7Output,
-} from '@/types/ai-schemas';
+import { buildContextPack } from '@/lib/ai/context-pack';
+import { evaluatePersonaProfile, type PersonaProfile } from '@/lib/ai/persona-engine';
+import { Pipeline3WeeklyPlannerSchema, type Pipeline3Output } from '@/types/ai-schemas';
 import type { GoalRow, MilestoneRow, TaskRow } from '@/types/db/goal-tables';
-import type { PersonaProfile } from '@/lib/ai/persona-engine';
+import { completeGoalWithJourneyCard } from './goal-completion.service';
+import { buildNextWeekTaskInserts } from './week-task-mapper';
 
-export interface CompleteGoalParams {
-  userId: string;
-  goal: GoalRow;
-  allMilestones: MilestoneRow[];
-  completedTasks: TaskRow[];
-  contextPack: unknown;
+export interface PlanNextWeekResult {
   weeklyReviewId: string;
-}
-
-export async function completeGoalWithJourneyCard(params: CompleteGoalParams) {
-  const { userId, goal, allMilestones, completedTasks, contextPack, weeklyReviewId } = params;
-  const admin = createAdminClient();
-
-  const { data: proofs } = await admin
-    .from('evidence')
-    .select('id, uploaded_at')
-    .eq('goal_id', goal.id)
-    .order('uploaded_at', { ascending: true });
-
-  const evidenceList = proofs || [];
-  const firstProofId = evidenceList[0]?.id;
-  const lastProofId = evidenceList[evidenceList.length - 1]?.id;
-  const featuredEvidenceIds = [firstProofId, lastProofId].filter(Boolean) as string[];
-
-  const { data: user } = await admin
-    .from('users')
-    .select('language, country')
-    .eq('id', userId)
-    .single();
-
-  const firewall7 = await checkAIFirewall({ userId, pipeline: 'PIPELINE_7', goalId: goal.id });
-  if (!firewall7.allowed) {
-    throw new AIFirewallError(firewall7.reason || 'FIREWALL_BLOCKED', firewall7.retryAfterSeconds);
-  }
-  const p7Output = await executeAIPipeline<Pipeline7Output>(
-    {
-      pipeline: 'PIPELINE_7',
-      userId,
-      goalId: goal.id,
-      model: firewall7.model,
-      language: (user?.language as 'EN' | 'BN') || 'EN',
-      country: user?.country || 'BD',
-      category: goal.category,
-      variables: {
-        goal_title: goal.title,
-        goal_why: goal.why,
-        goal_category: goal.category,
-        execution_mode: goal.execution_mode,
-        total_weeks: goal.current_week_number,
-        active_days_count: completedTasks.length,
-        current_baseline: goal.current_baseline_text,
-        completed_milestones_json: allMilestones,
-        top_proofs_summary_json: evidenceList.slice(0, 5),
-        comeback_weeks_count: 0,
-        context_pack_json: contextPack,
-      },
-    },
-    Pipeline7NextGoalBridgeSchema
-  );
-
-  const publicSlug = `j_${Math.random().toString(36).slice(2, 10)}`;
-  await admin.from('journey_cards').insert({
-    goal_id: goal.id,
-    user_id: userId,
-    public_slug: publicSlug,
-    journey_card_headline: p7Output.journey_card_headline,
-    day1_vs_now_story: p7Output.day1_vs_now_story,
-    comeback_highlight_line: p7Output.comeback_highlight_line || null,
-    featured_evidence_ids: featuredEvidenceIds,
-    next_goal_suggestions_json: p7Output.next_goal_suggestions,
-    visibility: 'PRIVATE',
-    status: 'ACTIVE',
-  });
-
-  await admin
-    .from('goals')
-    .update({
-      status: 'COMPLETED',
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', goal.id);
-
-  await admin.from('notifications').insert({
-    user_id: userId,
-    type: 'JOURNEY_CARD_EARNED',
-    title: 'Journey Card Earned! 🎓',
-    body: `You completed ${goal.title}! Your 100% free Journey Card is ready to share.`,
-    target_screen: `/journey/${publicSlug}`,
-  });
-
-  return {
-    weeklyReviewId,
-    isGoalCompleted: true,
-    journeyCardSlug: publicSlug,
-  };
+  isGoalCompleted: boolean;
+  journeyCardSlug?: string;
+  nextWeekNumber?: number;
 }
 
 export interface RolloverWeekParams {
@@ -127,7 +35,9 @@ export interface RolloverWeekParams {
   weeklyReviewId: string;
 }
 
-export async function rolloverToNextWeek(params: RolloverWeekParams) {
+export async function rolloverToNextWeek(
+  params: RolloverWeekParams
+): Promise<PlanNextWeekResult> {
   const {
     userId,
     goal,
@@ -142,6 +52,30 @@ export async function rolloverToNextWeek(params: RolloverWeekParams) {
   const admin = createAdminClient();
   const nextWeekNumber = goal.current_week_number + 1;
 
+  const { data: existingNextTasks } = await admin
+    .from('tasks')
+    .select('id')
+    .eq('goal_id', goal.id)
+    .eq('week_number', nextWeekNumber)
+    .limit(1);
+
+  if (existingNextTasks && existingNextTasks.length > 0) {
+    await admin
+      .from('goals')
+      .update({
+        current_week_number: nextWeekNumber,
+        streak_weeks: (goal.streak_weeks || 0) + 1,
+      })
+      .eq('id', goal.id)
+      .lt('current_week_number', nextWeekNumber);
+
+    return {
+      weeklyReviewId,
+      isGoalCompleted: false,
+      nextWeekNumber,
+    };
+  }
+
   const { data: user } = await admin
     .from('users')
     .select('day_time_map_json, language, country')
@@ -152,6 +86,7 @@ export async function rolloverToNextWeek(params: RolloverWeekParams) {
   if (!firewall3.allowed) {
     throw new AIFirewallError(firewall3.reason || 'FIREWALL_BLOCKED', firewall3.retryAfterSeconds);
   }
+
   const p3Output = await executeAIPipeline<Pipeline3Output>(
     {
       pipeline: 'PIPELINE_3',
@@ -193,37 +128,19 @@ export async function rolloverToNextWeek(params: RolloverWeekParams) {
     Pipeline3WeeklyPlannerSchema
   );
 
-  for (const t of p3Output.tasks) {
-    const targetMilestone =
-      allMilestones.find((m) => m.position === t.milestone_position) || activeMilestone;
+  const taskInserts = buildNextWeekTaskInserts(
+    goal.id,
+    nextWeekNumber,
+    p3Output.tasks,
+    allMilestones,
+    activeMilestone
+  );
 
-    await admin.from('tasks').insert({
-      goal_id: goal.id,
-      milestone_id: targetMilestone.id,
-      week_number: nextWeekNumber,
-      task_type: t.task_type,
-      adaptation_policy: t.adaptation_policy,
-      sequence_order: t.sequence_order,
-      target_count: t.target_count,
-      title: t.title,
-      done_means: t.done_means,
-      how_to_steps_json: {
-        steps: (t.how_to_steps?.steps || []).map((s) => ({
-          step_number: s.step_number,
-          text: s.text,
-          minutes: s.minutes,
-          done: false,
-          done_at: null,
-        })),
-        example: t.how_to_steps?.example || '',
-      },
-      min_version_10m: t.min_version_10m,
-      why_it_matters: t.why_it_matters,
-      used_context_ids: t.used_context_ids || [],
-      estimate_minutes: t.estimate_minutes,
-      is_stretch_task: t.is_stretch_task,
-      status: 'PENDING',
-    });
+  if (taskInserts.length > 0) {
+    const { error: insertErr } = await admin.from('tasks').insert(taskInserts);
+    if (insertErr) {
+      throw new Error(`Failed to insert Week ${nextWeekNumber} tasks: ${insertErr.message}`);
+    }
   }
 
   await admin
@@ -240,4 +157,80 @@ export async function rolloverToNextWeek(params: RolloverWeekParams) {
     isGoalCompleted: false,
     nextWeekNumber,
   };
+}
+
+export async function planNextWeek(
+  userId: string,
+  goalId: string
+): Promise<PlanNextWeekResult> {
+  const admin = createAdminClient();
+
+  const { data: goalRow, error: goalErr } = await admin
+    .from('goals')
+    .select('*')
+    .eq('id', goalId)
+    .eq('user_id', userId)
+    .single();
+
+  if (goalErr || !goalRow) throw new Error('Goal not found');
+  const goal = goalRow as unknown as GoalRow;
+
+  const [{ data: user }, { data: milestones }, { data: weekTasks }, { data: reviewRow }] =
+    await Promise.all([
+      admin.from('users').select('person_memory_json').eq('id', userId).single(),
+      admin.from('milestones').select('*').eq('goal_id', goalId).order('position', { ascending: true }),
+      admin.from('tasks').select('*').eq('goal_id', goalId).eq('week_number', goal.current_week_number),
+      admin
+        .from('weekly_reviews')
+        .select('id, ai_summary')
+        .eq('goal_id', goalId)
+        .eq('week_number', goal.current_week_number)
+        .maybeSingle(),
+    ]);
+
+  const allMilestones = (milestones || []) as unknown as MilestoneRow[];
+  const tasks = (weekTasks || []) as unknown as TaskRow[];
+  const completedTasks = tasks.filter((t) => t.status === 'DONE');
+  const carriedOrSkipped = tasks.filter((t) => t.status !== 'DONE');
+  const activeMilestone = allMilestones.find((m) => m.status === 'ACTIVE') || allMilestones[0];
+  const isFinalMilestone = activeMilestone?.position === allMilestones.length;
+  const isAllTasksCompleted = carriedOrSkipped.length === 0;
+
+  const contextPack = buildContextPack(
+    user?.person_memory_json,
+    goal.journey_memory_json,
+    goal.category,
+    15
+  );
+
+  const weeklyReviewId = reviewRow?.id || '';
+  if (isFinalMilestone && isAllTasksCompleted) {
+    return completeGoalWithJourneyCard({
+      userId,
+      goal,
+      allMilestones,
+      completedTasks,
+      contextPack,
+      weeklyReviewId,
+    });
+  }
+
+  const persona = evaluatePersonaProfile({
+    scheduledWorkingDays: goal.working_days || [1, 2, 3, 4, 5],
+    lastActivityDate: goal.last_activity_date || null,
+    tasksLast14Days: tasks,
+    evidenceLast10: [],
+  });
+
+  return rolloverToNextWeek({
+    userId,
+    goal,
+    allMilestones,
+    activeMilestone,
+    carriedOrSkipped,
+    contextPack,
+    persona,
+    lastSummary: reviewRow?.ai_summary || '',
+    weeklyReviewId,
+  });
 }

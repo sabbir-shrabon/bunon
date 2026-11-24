@@ -20,6 +20,7 @@ import { DayNoteSheet } from '@/components/today/day-note-sheet';
 import { GoalSwitcherSheet } from '@/components/today/goal-switcher-sheet';
 import { ThisWeekPlanModal } from '@/components/today/this-week-plan-modal';
 import { UndoCompleteSheet } from '@/components/today/undo-complete-sheet';
+import { runTwoStepWeekAdvance, requestTaskScheduleAdjust } from '@/components/today/week-advance-api';
 import type { TodayPlanResponse } from '@/lib/services/today-service';
 import type { ThreadTaskItem } from '@/components/today/types';
 import type { SubStepItem } from '@/types/domain';
@@ -38,6 +39,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
   const [isGoalSwitcherOpen, setIsGoalSwitcherOpen] = useState(false);
   const [isWeekPlanOpen, setIsWeekPlanOpen] = useState(false);
   const [isAdvancingWeek, setIsAdvancingWeek] = useState(false);
+  const [advanceStepLabel, setAdvanceStepLabel] = useState<string | null>(null);
   const [advanceWeekError, setAdvanceWeekError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -114,48 +116,34 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
   const handleAdjustSchedule = async (reason: string) => {
     const activeTask = data.threadTasks[focusedIndex] || data.heroTask;
     if (!activeTask) return;
-    const res = await fetch(`/api/tasks/${activeTask.id}/adjust`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stuckReason: reason }),
-    });
-    if (res.ok) {
-      await reloadPlan();
-      return;
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(
-      err.message ||
-        'Bunon AI is briefly paused. Your Today tasks, proofs, and Timeline continue working normally.'
-    );
+    await requestTaskScheduleAdjust(activeTask.id, reason);
+    await reloadPlan();
   };
 
   const handleAdvanceWeek = async () => {
     if (!data.activeGoal || isAdvancingWeek) return;
     setIsAdvancingWeek(true);
     setAdvanceWeekError(null);
+    const activeWeek = data.activeGoal.current_week_number;
     try {
-      const res = await fetch('/api/weeks/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goalId: data.activeGoal.id }),
-      });
-      if (res.ok) {
-        const result = await res.json();
-        if (result.isGoalCompleted && result.journeyCardSlug) router.push(`/journey/${result.journeyCardSlug}`);
-        else if (result.weeklyReviewId) router.push(`/weekly-summary/${result.weeklyReviewId}`);
-        else await reloadPlan();
+      const result = await runTwoStepWeekAdvance(data.activeGoal.id, activeWeek, setAdvanceStepLabel);
+      if (result.isGoalCompleted && result.journeyCardSlug) {
+        router.push(`/journey/${result.journeyCardSlug}`);
+      } else if (result.weeklyReviewId) {
+        router.push(`/weekly-summary/${result.weeklyReviewId}`);
       } else {
-        const err = await res.json().catch(() => ({}));
-        setAdvanceWeekError(
-          err.message ||
-            "Bunon's AI is momentarily busy. Your progress is safe — please tap to try again."
-        );
+        await reloadPlan();
+        router.refresh();
       }
-    } catch {
-      setAdvanceWeekError("Bunon's AI is momentarily busy. Your progress is safe — please tap to try again.");
+    } catch (err) {
+      setAdvanceWeekError(
+        err instanceof Error
+          ? err.message
+          : "We could not build next week's plan just now. Your progress is safe — please tap to try again."
+      );
     } finally {
       setIsAdvancingWeek(false);
+      setAdvanceStepLabel(null);
     }
   };
 
@@ -221,7 +209,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
 
               {data.isWeekDone && (
                 <div className="pt-2">
-                  <AllDoneView isWeekQueueDone={true} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceWeekError={advanceWeekError} />
+                  <AllDoneView isWeekQueueDone={true} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceStepLabel={advanceStepLabel} advanceWeekError={advanceWeekError} />
                 </div>
               )}
 
@@ -234,7 +222,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
               )}
             </div>
           ) : (
-            <AllDoneView isWeekQueueDone={data.isWeekDone} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceWeekError={advanceWeekError} />
+            <AllDoneView isWeekQueueDone={data.isWeekDone} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceStepLabel={advanceStepLabel} advanceWeekError={advanceWeekError} />
           )}
         </div>
       </main>

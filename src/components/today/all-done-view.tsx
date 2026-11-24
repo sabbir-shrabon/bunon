@@ -18,7 +18,25 @@ interface AllDoneViewProps {
   onStartTomorrowEarly?: () => void;
   hasUpcomingTasksThisWeek?: boolean;
   isAdvancingWeek?: boolean;
+  advanceStepLabel?: string | null;
   advanceWeekError?: string | null;
+}
+
+const DEFAULT_CALM_ERROR =
+  "We could not build next week's plan just now. Your progress is safe — please tap to try again.";
+
+function sanitizeAdvanceError(msg: string | null): string | null {
+  if (!msg) return null;
+  const trimmed = msg.trim();
+  if (
+    trimmed.startsWith('{') ||
+    trimmed.startsWith('[') ||
+    trimmed.includes('INVALID_ARGUMENT') ||
+    trimmed.includes('"error"')
+  ) {
+    return DEFAULT_CALM_ERROR;
+  }
+  return trimmed;
 }
 
 export function AllDoneView({
@@ -29,8 +47,10 @@ export function AllDoneView({
   onStartTomorrowEarly,
   hasUpcomingTasksThisWeek = false,
   isAdvancingWeek = false,
+  advanceStepLabel = null,
   advanceWeekError = null,
 }: Readonly<AllDoneViewProps>) {
+  const safeError = sanitizeAdvanceError(advanceWeekError);
   return (
     <section className="w-full rounded-[24px] border border-hairline bg-card p-8 text-center flex flex-col items-center">
       {/* Marigold Finished Knot Seal */}
@@ -54,15 +74,15 @@ export function AllDoneView({
             {isAdvancingWeek ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
-                Reviewing Week {weekNumber} &amp; building Week {weekNumber + 1}...
+                <span>{advanceStepLabel || `Step 1 of 2: Reviewing Week ${weekNumber}...`}</span>
               </span>
             ) : (
               `Review Week ${weekNumber} & unlock Week ${weekNumber + 1}`
             )}
           </PrimaryButton>
-          {advanceWeekError && (
+          {safeError && (
             <p className="text-[12px] text-red-600 dark:text-red-400 mt-2 text-center leading-relaxed font-medium">
-              {advanceWeekError}
+              {safeError}
             </p>
           )}
         </div>
