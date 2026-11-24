@@ -9,7 +9,10 @@ import { Suspense } from 'react';
 import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/db/server';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { EditProfileView } from '@/components/profile/edit-profile-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function EditProfileContent() {
   await connection();
@@ -21,6 +24,11 @@ async function EditProfileContent() {
   if (!user) {
     redirect('/login?next=/profile/edit');
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=/profile/edit');
 
   const { data: profile } = await supabase
     .from('users')

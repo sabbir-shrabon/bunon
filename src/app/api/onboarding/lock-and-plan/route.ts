@@ -11,6 +11,7 @@ import { createAdminClient } from '@/lib/db/admin';
 import { checkAIFirewall } from '@/lib/ai/firewall';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { buildContextPack } from '@/lib/ai/context-pack';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { Pipeline3WeeklyPlannerSchema, type Pipeline3Output } from '@/types/ai-schemas';
 import type { DayTimeMap, OutlineMode } from '@/types/domain';
 import {
@@ -31,6 +32,9 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
+
   let rawJson: unknown;
   try {
     rawJson = await request.json();
@@ -50,17 +54,28 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
   await cleanupOrphanGoals(admin, user.id);
 
-  // Enforce Free (1 active) / Pro (3 active) goal limit
+  // Enforce Free / Pro active goal limit from live system_settings
   const { data: profile } = await admin.from('users').select('pro_until, language, country, person_memory_json, day_time_map_json').eq('id', user.id).single();
-  const isPro = Boolean(profile?.pro_until && new Date(profile.pro_until) > new Date());
-  const maxActiveGoals = isPro ? 3 : 1;
+  const isPro = guard.profile.isPro;
+  const maxActiveGoals = isPro ? guard.settings.pro_roadmap_allowance : guard.settings.free_roadmap_allowance;
   const { count: activeCount } = await admin.from('goals').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'ACTIVE');
 
   if ((activeCount || 0) >= maxActiveGoals) {
     return NextResponse.json({
       error: 'GOAL_LIMIT_REACHED',
-      message: isPro ? 'You have 3 active goals. Finish or pause one first.' : 'Free plan includes 1 active goal. Upgrade to Pro for more.',
+      message: isPro ? `You have ${maxActiveGoals} active goals. Finish or pause one first.` : 'Free plan includes 1 active goal. Upgrade to Pro for more.',
     }, { status: 400 });
+  }
+
+  // Enforce AI Firewall BEFORE creating goal/milestones so AI_KILL_SWITCH_ACTIVE / caps cleanly abort
+  const firewall = await checkAIFirewall({
+    userId: user.id,
+    userIp: request.headers.get('x-forwarded-for'),
+    pipeline: 'PIPELINE_3',
+  });
+  if (!firewall.allowed) {
+    const err = formatAIFirewallHttpError(firewall.reason, firewall.retryAfterSeconds);
+    return NextResponse.json(err.body, { status: err.status });
   }
 
   const resolvedGoalTitle = (body.goalTitle || body.goal_title || '').trim();
@@ -146,8 +161,7 @@ export async function POST(request: NextRequest) {
     );
     try { await admin.from('onboarding_answers').insert(answersToInsert); } catch { /* non-fatal */ }
 
-    // Run Pipeline 3 for Week 1 Tasks
-    const firewall = await checkAIFirewall({ userId: user.id, userIp: request.headers.get('x-forwarded-for'), pipeline: 'PIPELINE_3', goalId: goal.id });
+    // Run Pipeline 3 for Week 1 Tasks using firewall-selected model
     const contextPack = buildContextPack(profile?.person_memory_json, journeyMemory, resolvedCategory, 15);
     const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -155,7 +169,7 @@ export async function POST(request: NextRequest) {
       pipeline: 'PIPELINE_3',
       userId: user.id,
       goalId: goal.id,
-      model: firewall.allowed ? firewall.model : 'gemini-3.5-flash-lite',
+      model: firewall.model,
       language: (profile?.language as 'EN' | 'BN') || 'EN',
       country: profile?.country || 'BD',
       category: resolvedCategory,

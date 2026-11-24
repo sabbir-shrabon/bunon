@@ -10,7 +10,10 @@ import { connection } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient } from '@/lib/db/server';
 import { getTodayPlan, type TodayPlanResponse } from '@/lib/services/today-service';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { TodayView } from '@/components/today/today-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 interface TodayPageProps {
   searchParams: Promise<{ goalId?: string; completed?: string }>;
@@ -43,6 +46,8 @@ async function TodayPageContent({ searchParams }: TodayPageProps) {
   const hasAuthCookie = cookieStore.getAll().some((c) => c.name.startsWith('sb-'));
 
   if (!hasAuthCookie) {
+    const { blocked } = await getPageAccessState(null);
+    if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
     return <TodayView initialData={emptyGuestPlan} />;
   }
 
@@ -52,8 +57,15 @@ async function TodayPageContent({ searchParams }: TodayPageProps) {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    const { blocked } = await getPageAccessState(null);
+    if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
     return <TodayView initialData={emptyGuestPlan} />;
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') return <TodayView initialData={emptyGuestPlan} />;
 
   const { goalId } = await searchParams;
   const planData = await getTodayPlan(user.id, goalId);

@@ -11,6 +11,7 @@ import { createAdminClient } from '@/lib/db/admin';
 import { checkAIFirewall } from '@/lib/ai/firewall';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { buildContextPack } from '@/lib/ai/context-pack';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { Pipeline2RoadmapGeneratorSchema } from '@/types/ai-schemas';
 
 export const maxDuration = 60;
@@ -24,6 +25,9 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const admin = createAdminClient();
   const { data: profile } = await admin
@@ -69,13 +73,8 @@ export async function POST(request: NextRequest) {
   });
 
   if (!firewall.allowed) {
-    if (firewall.reason === 'RATE_LIMITED') {
-      return NextResponse.json(
-        { error: 'RATE_LIMITED', retry_after_seconds: firewall.retryAfterSeconds },
-        { status: 429 }
-      );
-    }
-    return NextResponse.json({ error: firewall.reason }, { status: 403 });
+    const err = formatAIFirewallHttpError(firewall.reason, firewall.retryAfterSeconds);
+    return NextResponse.json(err.body, { status: err.status });
   }
 
   const contextPack = buildContextPack(

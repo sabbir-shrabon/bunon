@@ -10,7 +10,10 @@ import { redirect } from 'next/navigation';
 import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { getWhatBunonKnows } from '@/lib/services/context-service';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { WhatBunonKnowsView } from '@/components/what-bunon-knows/what-bunon-knows-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 interface PageProps {
   searchParams: Promise<{ goalId?: string }>;
@@ -26,6 +29,11 @@ async function WhatBunonKnowsContent({ searchParams }: PageProps) {
   if (!user) {
     redirect('/login?next=%2Fwhat-bunon-knows');
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=%2Fwhat-bunon-knows');
 
   const { goalId } = await searchParams;
   const initialData = await getWhatBunonKnows(user.id, goalId);

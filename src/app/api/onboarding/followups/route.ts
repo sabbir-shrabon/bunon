@@ -10,6 +10,7 @@ import { createClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
 import { checkAIFirewall } from '@/lib/ai/firewall';
 import { executeAIPipeline } from '@/lib/ai/assembler';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { Pipeline1OnboardingFollowupsSchema } from '@/types/ai-schemas';
 
 export const maxDuration = 60;
@@ -24,17 +25,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
+
   const admin = createAdminClient();
 
-  // Enforce Free plan (1 active goal) and Pro plan (3 active goals) limit
+  // Enforce Free plan and Pro plan active goal limit from live system_settings
   const { data: profile } = await admin
     .from('users')
     .select('pro_until, language, country, birth_year, person_memory_json')
     .eq('id', user.id)
     .single();
 
-  const isPro = Boolean(profile?.pro_until && new Date(profile.pro_until) > new Date());
-  const maxActiveGoals = isPro ? 3 : 1;
+  const isPro = guard.profile.isPro;
+  const maxActiveGoals = isPro
+    ? guard.settings.pro_roadmap_allowance
+    : guard.settings.free_roadmap_allowance;
 
   const { count: activeGoalsCount } = await admin
     .from('goals')
@@ -78,13 +84,8 @@ export async function POST(request: NextRequest) {
   });
 
   if (!firewall.allowed) {
-    if (firewall.reason === 'RATE_LIMITED') {
-      return NextResponse.json(
-        { error: 'RATE_LIMITED', retry_after_seconds: firewall.retryAfterSeconds },
-        { status: 429 }
-      );
-    }
-    return NextResponse.json({ error: firewall.reason }, { status: 403 });
+    const err = formatAIFirewallHttpError(firewall.reason, firewall.retryAfterSeconds);
+    return NextResponse.json(err.body, { status: err.status });
   }
 
   // Fetch active categories to construct {{active_categories_list}}

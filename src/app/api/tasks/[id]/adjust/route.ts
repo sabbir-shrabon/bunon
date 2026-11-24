@@ -10,6 +10,7 @@ import { createClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
 import { checkAIFirewall } from '@/lib/ai/firewall';
 import { executeAIPipeline } from '@/lib/ai/assembler';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { Pipeline4DailyAdjusterSchema, type Pipeline4Output } from '@/types/ai-schemas';
 import { buildContextPack } from '@/lib/ai/context-pack';
 import type { TaskRow, GoalRow } from '@/types/db/goal-tables';
@@ -29,6 +30,9 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const { id: taskId } = await params;
   const body = (await request.json()) as {
@@ -98,16 +102,18 @@ export async function POST(
   // 3. AI Firewall Check
   const decision = await checkAIFirewall({
     userId: user.id,
+    userIp: request.headers.get('x-forwarded-for'),
     pipeline: 'PIPELINE_4',
     goalId: goal.id,
   });
 
   if (!decision.allowed) {
-    return NextResponse.json({ error: decision.reason || 'FIREWALL_BLOCKED' }, { status: 429 });
+    const formatted = formatAIFirewallHttpError(decision.reason, decision.retryAfterSeconds);
+    return NextResponse.json(formatted.body, { status: formatted.status });
   }
 
   // 4. Fetch context and open tasks
-  const { data: userRow } = await admin.from('users').select('person_memory_json, preferred_language').eq('id', user.id).single();
+  const { data: userRow } = await admin.from('users').select('person_memory_json, language').eq('id', user.id).single();
   const contextPack = buildContextPack(userRow?.person_memory_json, goal.journey_memory_json, goal.category);
 
   const { data: openTasks } = await admin
@@ -117,7 +123,7 @@ export async function POST(
     .in('status', ['PENDING', 'CARRIED'])
     .order('sequence_order', { ascending: true });
 
-  const lang = userRow?.preferred_language === 'BN' ? 'BN' : 'EN';
+  const lang = userRow?.language === 'BN' ? 'BN' : 'EN';
 
   const variables = {
     language: lang,

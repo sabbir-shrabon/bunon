@@ -7,6 +7,7 @@ import 'server-only';
  */
 
 import { createAdminClient } from '@/lib/db/admin';
+import { isUserProActive } from '@/lib/auth/entitlement';
 import { evaluatePersonaProfile, type PersonaProfile } from '@/lib/ai/persona-engine';
 import { sliceAdaptiveSteps, type StepSlicerResult } from '@/lib/ai/step-slicer';
 import { getTodayDayNote } from './day-note-service';
@@ -21,6 +22,8 @@ export type { ContextBannerData, ContextBannerType };
 export interface TodayPlanResponse {
   hasActiveGoal: boolean;
   isPaused: boolean;
+  isPro?: boolean;
+  proUntil?: string | null;
   goals: Array<{ id: string; title: string; category: string; pendingCount: number }>;
   activeGoal: GoalRow | null;
   currentMilestone: MilestoneRow | null;
@@ -43,16 +46,26 @@ export async function getTodayPlan(
 ): Promise<TodayPlanResponse> {
   const admin = createAdminClient();
 
-  const { data: userGoals } = await admin
-    .from('goals')
-    .select('*')
-    .eq('user_id', userId)
-    .in('status', ['ACTIVE', 'DRAFT', 'PAUSED'])
-    .order('created_at', { ascending: false });
+  const [{ data: userGoals }, { data: userProfile }] = await Promise.all([
+    admin
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .in('status', ['ACTIVE', 'DRAFT', 'PAUSED'])
+      .order('created_at', { ascending: false }),
+    admin
+      .from('users')
+      .select('pro_until')
+      .eq('id', userId)
+      .maybeSingle(),
+  ]);
+
+  const proUntil = userProfile?.pro_until ?? null;
+  const isPro = isUserProActive(proUntil);
 
   if (!userGoals || userGoals.length === 0) {
     return {
-      hasActiveGoal: false, isPaused: false, goals: [], activeGoal: null, currentMilestone: null,
+      hasActiveGoal: false, isPaused: false, isPro, proUntil, goals: [], activeGoal: null, currentMilestone: null,
       heroTask: null, heroTaskSteps: [], adaptiveSlice: null, remainingWeekTasks: [], threadTasks: [],
       activeTaskIndex: 0, isWeekDone: false, persona: null, banner: null, todayDayNote: null, streakText: null,
     };
@@ -250,6 +263,8 @@ export async function getTodayPlan(
   return {
     hasActiveGoal: true,
     isPaused,
+    isPro,
+    proUntil,
     goals: goalSummaries,
     activeGoal: activeGoal as unknown as GoalRow,
     currentMilestone: milestone as unknown as MilestoneRow | null,

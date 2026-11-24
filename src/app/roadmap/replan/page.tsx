@@ -43,7 +43,7 @@ function ReplanContent() {
     })
       .then((res) => res.json())
       .then((data) => {
-        if (data.error) setError(data.error);
+        if (data.error) setError(data.message || data.error);
         else {
           setSummary(data.replanSummary);
           setRevisedMilestones(data.revisedMilestones || []);

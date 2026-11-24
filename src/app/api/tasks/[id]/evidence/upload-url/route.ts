@@ -8,7 +8,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/db/server';
-import { requestProofUploadUrl } from '@/lib/services/evidence-service';
+import { requestProofUploadUrl, type ProofUploadLimits } from '@/lib/services/evidence-service';
 import type { EvidenceType } from '@/types/domain';
 
 const UploadUrlSchema = z.object({
@@ -20,8 +20,25 @@ const UploadUrlSchema = z.object({
   durationSeconds: z.coerce.number().min(0).optional(),
 });
 
-function getHumanReadableErrorMessage(code: string): string {
+function formatBytesLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1).replace(/\.0$/, '')} GB`;
+  }
+  return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
+}
+
+function getHumanReadableErrorMessage(code: string, limits?: ProofUploadLimits): string {
+  const maxFileLabel = formatBytesLabel(limits?.maxFileSizeBytes ?? 10 * 1024 * 1024);
+  const quotaLabel = formatBytesLabel(limits?.storageQuotaBytes ?? 50 * 1024 * 1024);
+  const maxVideoSec = limits?.maxVideoDurationSeconds ?? 30;
+
   switch (code) {
+    case 'MAINTENANCE_MODE':
+      return 'Bunon is taking a brief pause for maintenance. Please try again shortly.';
+    case 'ACCOUNT_SUSPENDED':
+      return 'Your account has been suspended.';
+    case 'USER_INACTIVE':
+      return 'Your account is not active.';
     case 'TASK_NOT_FOUND':
       return 'Task not found or does not belong to your active goal.';
     case 'USER_NOT_FOUND':
@@ -31,9 +48,11 @@ function getHumanReadableErrorMessage(code: string): string {
     case 'DAILY_PHOTO_LIMIT':
       return 'Free plan includes 1 photo proof per day. Upgrade to Pro for unlimited proofs.';
     case 'FILE_TOO_LARGE':
-      return 'File size exceeds the 10 MB limit. Please select a smaller file.';
+      return `File size exceeds the ${maxFileLabel} limit. Please select a smaller file.`;
+    case 'VIDEO_TOO_LONG':
+      return `Video duration exceeds the ${maxVideoSec}s limit. Please trim your video.`;
     case 'STORAGE_FULL':
-      return 'Storage limit reached (50 MB on Free plan). Upgrade to Pro for 2 GB.';
+      return `Storage limit reached (${quotaLabel}). ${limits?.isPro ? 'Remove an older file to free up space.' : 'Upgrade to Pro for expanded cloud storage.'}`;
     default:
       return code.toLowerCase().includes('bucket') || code.toLowerCase().includes('not found')
         ? 'Proof storage is temporarily unavailable. Please try again.'
@@ -85,11 +104,16 @@ export async function POST(
 
   if (!result.success) {
     const code = result.error || 'UPLOAD_URL_FAILED';
-    console.error('[evidence/upload-url 400]', { code, details: result.error });
-    return NextResponse.json({
-      error: code,
-      message: getHumanReadableErrorMessage(code),
-    }, { status: 400 });
+    const status = code === 'MAINTENANCE_MODE' ? 503 : code === 'ACCOUNT_SUSPENDED' || code === 'USER_INACTIVE' ? 403 : 400;
+    console.error(`[evidence/upload-url ${status}]`, { code, details: result.error });
+    return NextResponse.json(
+      {
+        error: code,
+        message: getHumanReadableErrorMessage(code, result.limits),
+        limits: result.limits,
+      },
+      { status }
+    );
   }
 
   return NextResponse.json({
@@ -98,5 +122,6 @@ export async function POST(
     token: result.token,
     path: result.path,
     storagePath: result.path,
+    limits: result.limits,
   });
 }

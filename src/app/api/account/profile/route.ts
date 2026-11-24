@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 
 const profileSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(60),
@@ -26,6 +27,9 @@ export async function PATCH(request: Request) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   try {
     const body = (await request.json()) as unknown;

@@ -38,14 +38,22 @@ export function StuckSheet({
 }: Readonly<StuckSheetProps>) {
   const [selectedReason, setSelectedReason] = useState<string>('TOO_TIRED');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleAdjust = async () => {
     setIsSubmitting(true);
+    setErrorMessage(null);
     try {
       await onAdjustSchedule(selectedReason);
       onClose();
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Could not adjust schedule right now. You can use the 10-minute version instead.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -124,6 +132,12 @@ export function StuckSheet({
             );
           })}
         </div>
+
+        {errorMessage && (
+          <p className="mb-3 rounded-xl border border-hairline bg-secondary-surface/50 px-3 py-2 text-[12px] text-ink leading-relaxed">
+            {errorMessage}
+          </p>
+        )}
 
         {/* Solid Black Primary CTA */}
         <div className="w-full flex justify-center mb-3">

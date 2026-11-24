@@ -2,7 +2,7 @@
  * 1. Purpose: Pipeline 1B endpoint ingesting user files/notes context and extracting a structured starting brief.
  * 2. Spec Ref: Prompt Catalog v2.5 Section 7 Pipeline 1B (Prompt #16) & Screen 10a/10b/14.
  * 3. Called By: Onboarding wizard for file/notes context path.
- * 4. Calls: createClient, createAdminClient, processOnboardingFile, checkAIFirewall, executeAIPipeline.
+ * 4. Calls: createClient, createAdminClient, guardApiRoute, getSystemSettings, processOnboardingFile, checkAIFirewall, executeAIPipeline.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
@@ -10,7 +10,9 @@ import { createClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
 import { checkAIFirewall } from '@/lib/ai/firewall';
 import { executeAIPipeline } from '@/lib/ai/assembler';
-import { processOnboardingFile, type ExtractedContextFile } from '@/lib/ai/file-extractor';
+import { processOnboardingFile, type ExtractedContextFile, type InlineMediaPart } from '@/lib/ai/file-extractor';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
+import { getSystemSettings } from '@/lib/services/system-settings.service';
 import { Pipeline1BOutputSchema, type Pipeline1BOutput } from '@/types/ai-schemas';
 import type { OutlineMode } from '@/types/domain';
 
@@ -31,6 +33,17 @@ function parseWorkingDays(val: FormDataEntryValue | null): number[] {
   return split.length > 0 ? split : [0, 1, 2, 3, 4];
 }
 
+function isUploadedFile(entry: FormDataEntryValue): entry is File {
+  return (
+    typeof entry === 'object' &&
+    entry !== null &&
+    'name' in entry &&
+    'size' in entry &&
+    typeof (entry as File).arrayBuffer === 'function' &&
+    (entry as File).size > 0
+  );
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -39,15 +52,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
+
   const admin = createAdminClient();
-  const [{ data: profile }, { data: settings }, { data: categories }] = await Promise.all([
+  const [{ data: profile }, settings, { data: categories }] = await Promise.all([
     admin.from('users').select('language, country, birth_year, person_memory_json').eq('id', user.id).single(),
-    admin.from('system_settings').select('onboarding_context_max_files, onboarding_context_max_file_size_bytes').eq('id', 1).single(),
+    getSystemSettings({ fresh: true }),
     admin.from('goal_categories').select('slug').eq('is_active', true),
   ]);
 
-  const maxFiles = Number(settings?.onboarding_context_max_files) || 1;
-  const maxFileSizeBytes = Number(settings?.onboarding_context_max_file_size_bytes) || 5242880;
+  const maxFiles = settings.onboarding_context_max_files;
+  const maxFileSizeBytes = settings.onboarding_context_max_file_size_bytes;
 
   let formData: FormData;
   try {
@@ -56,7 +72,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'INVALID_FORM_DATA', message: 'Expected multipart/form-data' }, { status: 400 });
   }
 
-  const file = formData.get('file');
+  const uploadedFiles = [...formData.getAll('files'), ...formData.getAll('file')].filter(isUploadedFile);
+  if (uploadedFiles.length > maxFiles) {
+    return NextResponse.json(
+      {
+        error: 'TOO_MANY_FILES',
+        message: `You can upload at most ${maxFiles} ${maxFiles === 1 ? 'file' : 'files'}.`,
+      },
+      { status: 400 }
+    );
+  }
+
   const pastedText = (formData.get('pastedText') as string | null)?.trim() || '';
   const outlineModeRaw = formData.get('outlineMode') as string | null;
   const outlineMode: OutlineMode = outlineModeRaw === 'FOLLOW_OUTLINE' ? 'FOLLOW_OUTLINE' : 'BACKGROUND_CONTEXT';
@@ -65,23 +91,44 @@ export async function POST(request: NextRequest) {
   const rawHours = formData.get('hoursPerDay');
   const hoursPerDay = Math.max(0.5, Math.min(8.0, Number(rawHours) || 2.0));
 
-  let extractedResult: ExtractedContextFile | null = null;
-  if (file && typeof file === 'object' && 'name' in file && 'size' in file && (file as File).size > 0) {
+  const extractedResults: ExtractedContextFile[] = [];
+  for (const uploadedFile of uploadedFiles) {
     try {
-      extractedResult = await processOnboardingFile(file as File, { maxFiles, maxFileSizeBytes });
+      const extracted = await processOnboardingFile(uploadedFile, { maxFiles, maxFileSizeBytes });
+      extractedResults.push(extracted);
     } catch (err) {
       const errCode = err instanceof Error ? err.message : 'EXTRACTION_FAILED';
-      return NextResponse.json({ error: errCode }, { status: 400 });
+      const maxMb = (maxFileSizeBytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
+      const message =
+        errCode === 'FILE_TOO_LARGE'
+          ? `File "${uploadedFile.name}" exceeds the ${maxMb} MB limit.`
+          : errCode === 'UNSUPPORTED_FILE_TYPE'
+            ? `Unsupported file type for "${uploadedFile.name}".`
+            : errCode;
+      return NextResponse.json({ error: errCode, message }, { status: 400 });
     }
   }
 
   const textParts: string[] = [];
   if (pastedText) textParts.push(pastedText.slice(0, 8000));
-  if (extractedResult?.extractedText) textParts.push(extractedResult.extractedText);
+  for (const res of extractedResults) {
+    if (res.extractedText) {
+      textParts.push(
+        extractedResults.length > 1
+          ? `[File: ${res.fileName}]\n${res.extractedText}`
+          : res.extractedText
+      );
+    }
+  }
   let textForPrompt = textParts.join('\n\n---\n\n').slice(0, 12000);
 
-  if (!textForPrompt && extractedResult?.inlinePart) {
-    textForPrompt = `[Attached visual or document context: ${extractedResult.fileName}]`;
+  const inlineParts = extractedResults
+    .map((r) => r.inlinePart)
+    .filter((p): p is InlineMediaPart => Boolean(p));
+
+  if (!textForPrompt && inlineParts.length > 0) {
+    const names = extractedResults.map((r) => r.fileName).join(', ');
+    textForPrompt = `[Attached visual or document context: ${names}]`;
   }
 
   if (!textForPrompt) {
@@ -99,10 +146,8 @@ export async function POST(request: NextRequest) {
   });
 
   if (!firewall.allowed) {
-    if (firewall.reason === 'RATE_LIMITED') {
-      return NextResponse.json({ error: 'RATE_LIMITED', retry_after_seconds: firewall.retryAfterSeconds }, { status: 429 });
-    }
-    return NextResponse.json({ error: firewall.reason }, { status: 403 });
+    const err = formatAIFirewallHttpError(firewall.reason, firewall.retryAfterSeconds);
+    return NextResponse.json(err.body, { status: err.status });
   }
 
   let totalWeeks = 12;
@@ -112,7 +157,6 @@ export async function POST(request: NextRequest) {
   }
 
   const activeCategoriesList = (categories || []).map((c) => c.slug);
-  const inlineParts = extractedResult?.inlinePart ? [extractedResult.inlinePart] : undefined;
 
   try {
     const output = await executeAIPipeline<Pipeline1BOutput>(
@@ -122,7 +166,7 @@ export async function POST(request: NextRequest) {
         model: firewall.model,
         language: (profile?.language as 'EN' | 'BN') || 'EN',
         country: profile?.country || 'BD',
-        inlineParts,
+        inlineParts: inlineParts.length > 0 ? inlineParts : undefined,
         variables: {
           language: (profile?.language as 'EN' | 'BN') || 'EN',
           user_birth_year: profile?.birth_year || 1998,

@@ -32,7 +32,7 @@ export interface OnboardingState {
   entryPath: OnboardingEntryPath;
 
   // File / Notes Context (Two-Path Onboarding)
-  attachedFile: File | null;
+  attachedFiles: File[];
   pastedNotes: string;
   outlineMode: OutlineMode;
   extractedOutlineSummary: string;

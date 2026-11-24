@@ -1,8 +1,8 @@
 /**
- * 1. Purpose: Screen 40 (Create proof) client view matching create_proof Stitch design faithfully.
+ * 1. Purpose: Screen 40 (Create proof) client view supporting photo, link, note, and Pro video/file proofs.
  * 2. Spec Ref: Stitch create_proof code.html & screen.png & Category D Screens 39-49.
  * 3. Called By: /proof/create page.
- * 4. Calls: CameraModal, LinkSheet, ProofLimitSheet, ProofPreviewCard, ProofAddGrid, EffortCheckinCard, uploadProofPhoto.
+ * 4. Calls: CameraModal, LinkSheet, ProofLimitSheet, ProofPreviewCard, ProofAddGrid, EffortCheckinCard, uploadProofAttachment.
  */
 
 'use client';
@@ -16,27 +16,53 @@ import { ProofPreviewCard } from './proof-preview-card';
 import { ProofAddGrid } from './proof-add-grid';
 import { EffortCheckinCard } from './effort-checkin-card';
 import { compressPhoto } from './compress-photo';
-import { uploadProofPhoto } from './upload-proof-photo';
+import { uploadProofAttachment } from './upload-proof-photo';
 import { PrimaryButton } from '@/components/ui/primary-button';
 
 interface CreateProofViewProps {
   taskId: string;
   taskTitle: string;
   isPro?: boolean;
+  maxFileSizeBytes?: number;
+  maxVideoDurationSeconds?: number;
+}
+
+function readVideoDuration(file: File): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? Math.ceil(video.duration) : undefined;
+      URL.revokeObjectURL(url);
+      resolve(duration);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(undefined);
+    };
+    video.src = url;
+  });
 }
 
 export function CreateProofView({
   taskId,
   taskTitle,
   isPro = false,
+  maxFileSizeBytes = 10 * 1024 * 1024,
+  maxVideoDurationSeconds = 30,
 }: Readonly<CreateProofViewProps>) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
+  const [attachmentType, setAttachmentType] = useState<'PHOTO' | 'VIDEO' | 'FILE' | null>(null);
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoFileName, setPhotoFileName] = useState<string>('');
   const [photoSizeBytes, setPhotoSizeBytes] = useState<number>(0);
+  const [videoDurationSeconds, setVideoDurationSeconds] = useState<number | undefined>(undefined);
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
 
   const [caption, setCaption] = useState('');
@@ -49,26 +75,34 @@ export function CreateProofView({
   const [isLinkSheetOpen, setIsLinkSheetOpen] = useState(false);
   const [limitSheetType, setLimitSheetType] = useState<'PHOTO_LIMIT_47' | 'PRO_LOCKED_48' | 'STORAGE_FULL_119' | null>(null);
 
-  const clearProofState = useCallback(() => {
+  const clearAttachment = useCallback(() => {
     setPhotoPreviewUrl((prev) => {
       if (prev) { try { URL.revokeObjectURL(prev); } catch {} }
       return null;
     });
+    setAttachmentType(null);
     setPhotoBlob(null);
     setPhotoFileName('');
     setPhotoSizeBytes(0);
+    setVideoDurationSeconds(undefined);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (videoInputRef.current) videoInputRef.current.value = '';
+    if (docInputRef.current) docInputRef.current.value = '';
+  }, []);
+
+  const clearProofState = useCallback(() => {
+    clearAttachment();
     setLinkUrl(null);
     setCaption('');
     setEffortRating(null);
     setIsEffortDismissed(false);
     setIsSubmitting(false);
     setErrorMessage(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
     try {
       sessionStorage.removeItem('camera_capture_cache');
       sessionStorage.removeItem('proof_draft_cache');
     } catch {}
-  }, []);
+  }, [clearAttachment]);
 
   useEffect(() => {
     clearProofState();
@@ -76,7 +110,10 @@ export function CreateProofView({
   }, [taskId, clearProofState]);
 
   const handlePhotoCompressed = async (file: Blob, name: string) => {
+    setErrorMessage(null);
     const compressed = await compressPhoto(file);
+    clearAttachment();
+    setAttachmentType('PHOTO');
     setPhotoBlob(compressed);
     setPhotoSizeBytes(compressed.size);
     setPhotoFileName(name);
@@ -84,9 +121,45 @@ export function CreateProofView({
     setLinkUrl(null);
   };
 
+  const handleVideoSelected = async (file: File) => {
+    setErrorMessage(null);
+    if (file.size > maxFileSizeBytes) {
+      setErrorMessage(`Video exceeds the ${Math.max(1, Math.round(maxFileSizeBytes / (1024 * 1024)))} MB file limit.`);
+      return;
+    }
+    const duration = await readVideoDuration(file);
+    if (typeof duration === 'number' && duration > maxVideoDurationSeconds) {
+      setErrorMessage(`Video exceeds the ${maxVideoDurationSeconds}s limit.`);
+      return;
+    }
+    clearAttachment();
+    setAttachmentType('VIDEO');
+    setPhotoBlob(file);
+    setPhotoSizeBytes(file.size);
+    setPhotoFileName(file.name);
+    setVideoDurationSeconds(duration);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    setLinkUrl(null);
+  };
+
+  const handleDocSelected = (file: File) => {
+    setErrorMessage(null);
+    if (file.size > maxFileSizeBytes) {
+      setErrorMessage(`File exceeds the ${Math.max(1, Math.round(maxFileSizeBytes / (1024 * 1024)))} MB file limit.`);
+      return;
+    }
+    clearAttachment();
+    setAttachmentType('FILE');
+    setPhotoBlob(file);
+    setPhotoSizeBytes(file.size);
+    setPhotoFileName(file.name);
+    setPhotoPreviewUrl(null);
+    setLinkUrl(null);
+  };
+
   const handleSubmit = async () => {
     if (!photoBlob && !linkUrl && !caption.trim()) {
-      setErrorMessage('Please add a photo, link, or note explaining your work');
+      setErrorMessage('Please add a photo, file, link, or note explaining your work');
       return;
     }
     setIsSubmitting(true);
@@ -94,23 +167,31 @@ export function CreateProofView({
 
     try {
       let storagePath: string | undefined;
+      const mediaType = attachmentType || (photoBlob ? 'PHOTO' : null);
 
-      if (photoBlob) {
-        const uploadResult = await uploadProofPhoto(taskId, photoBlob, photoFileName, photoSizeBytes);
+      if (photoBlob && mediaType) {
+        const uploadResult = await uploadProofAttachment(
+          taskId,
+          photoBlob,
+          photoFileName,
+          photoSizeBytes,
+          mediaType,
+          videoDurationSeconds
+        );
         if (uploadResult.errorType) {
           setLimitSheetType(uploadResult.errorType);
           setIsSubmitting(false);
           return;
         }
         if (uploadResult.errorMessage || !uploadResult.storagePath) {
-          setErrorMessage(uploadResult.errorMessage || 'Photo upload failed');
+          setErrorMessage(uploadResult.errorMessage || 'Proof upload failed');
           setIsSubmitting(false);
           return;
         }
         storagePath = uploadResult.storagePath;
       }
 
-      const proofType = photoBlob ? 'PHOTO' : linkUrl ? 'LINK' : 'NOTE';
+      const proofType = mediaType || (linkUrl ? 'LINK' : 'NOTE');
       const completeRes = await fetch(`/api/tasks/${taskId}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -119,6 +200,7 @@ export function CreateProofView({
           storagePath,
           externalUrl: linkUrl,
           fileSizeBytes: photoSizeBytes || photoBlob?.size || 0,
+          durationSeconds: videoDurationSeconds,
           captionNote: caption.trim() || undefined,
           effortRating: effortRating || undefined,
         }),
@@ -149,7 +231,27 @@ export function CreateProofView({
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) handlePhotoCompressed(f, f.name);
+          if (f) void handlePhotoCompressed(f, f.name);
+        }}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void handleVideoSelected(f);
+        }}
+      />
+      <input
+        ref={docInputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.txt,.md,.csv,.json,.zip,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleDocSelected(f);
         }}
       />
 
@@ -169,8 +271,14 @@ export function CreateProofView({
         </div>
 
         <ProofPreviewCard
-          photoPreviewUrl={photoPreviewUrl} photoFileName={photoFileName} photoSizeBytes={photoSizeBytes} linkUrl={linkUrl}
-          onRemovePhoto={() => { setPhotoBlob(null); setPhotoPreviewUrl(null); }} onRemoveLink={() => setLinkUrl(null)}
+          attachmentType={attachmentType}
+          photoPreviewUrl={photoPreviewUrl}
+          photoFileName={photoFileName}
+          photoSizeBytes={photoSizeBytes}
+          durationSeconds={videoDurationSeconds}
+          linkUrl={linkUrl}
+          onRemovePhoto={clearAttachment}
+          onRemoveLink={() => setLinkUrl(null)}
         />
 
         <div className="w-full bg-card rounded-[20px] border border-hairline/60 p-5 flex flex-col">
@@ -189,11 +297,18 @@ export function CreateProofView({
         </div>
 
         <ProofAddGrid
+          isPro={isPro}
           onCameraClick={() => setIsCameraOpen(true)}
           onGalleryClick={() => fileInputRef.current?.click()}
           onLinkClick={() => setIsLinkSheetOpen(true)}
-          onVideoClick={() => setLimitSheetType('PRO_LOCKED_48')}
-          onFileClick={() => setLimitSheetType('PRO_LOCKED_48')}
+          onVideoClick={() => {
+            if (isPro) videoInputRef.current?.click();
+            else setLimitSheetType('PRO_LOCKED_48');
+          }}
+          onFileClick={() => {
+            if (isPro) docInputRef.current?.click();
+            else setLimitSheetType('PRO_LOCKED_48');
+          }}
         />
 
         {!isEffortDismissed && (
@@ -218,11 +333,13 @@ export function CreateProofView({
       <CameraModal
         isOpen={isCameraOpen} onClose={() => setIsCameraOpen(false)}
         onCapture={(blob, previewUrl) => {
+          clearAttachment();
+          setAttachmentType('PHOTO');
           setPhotoBlob(blob); setPhotoSizeBytes(blob.size); setPhotoFileName('camera_snapshot.jpg');
           setPhotoPreviewUrl(previewUrl); setLinkUrl(null); setIsCameraOpen(false);
         }}
       />
-      <LinkSheet isOpen={isLinkSheetOpen} onClose={() => setIsLinkSheetOpen(false)} onAddLink={(url) => { setLinkUrl(url); setPhotoBlob(null); setPhotoPreviewUrl(null); }} />
+      <LinkSheet isOpen={isLinkSheetOpen} onClose={() => setIsLinkSheetOpen(false)} onAddLink={(url) => { setLinkUrl(url); clearAttachment(); }} />
       <ProofLimitSheet isOpen={Boolean(limitSheetType)} type={limitSheetType || 'PHOTO_LIMIT_47'} onClose={() => setLimitSheetType(null)} onUseNoteOrLink={() => setLimitSheetType(null)} />
     </div>
   );

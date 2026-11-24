@@ -9,7 +9,10 @@ import { Suspense } from 'react';
 import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/db/server';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { ProfileView } from '@/components/profile/profile-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function ProfileContent() {
   await connection();
@@ -21,6 +24,11 @@ async function ProfileContent() {
   if (!user) {
     redirect('/login?next=/profile');
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=/profile');
 
   // 1. Fetch user profile from public.users
   const { data: profile } = await supabase

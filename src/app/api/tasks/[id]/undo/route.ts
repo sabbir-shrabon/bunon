@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 import { undoTaskAdjustment } from '@/lib/services/task-service';
 
 export async function POST(
@@ -21,6 +22,9 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const { id: taskId } = await params;
   const result = await undoTaskAdjustment(user.id, taskId);

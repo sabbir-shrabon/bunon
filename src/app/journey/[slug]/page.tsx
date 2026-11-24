@@ -7,10 +7,13 @@ import React, { Suspense } from 'react';
  */
 
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { getPublicJourneyCard, getJourneyCard } from '@/lib/services/journey-service';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { JourneyCardView } from '@/components/journey/journey-card-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 export async function generateMetadata({
   params,
@@ -43,11 +46,16 @@ async function JourneyContent({
 }: {
   params: Promise<{ slug: string }>;
 }) {
+  await connection();
   const { slug } = await params;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const { blocked } = await getPageAccessState(user?.id ?? null);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
 
   let card = await getPublicJourneyCard(slug);
   let isOwner = false;

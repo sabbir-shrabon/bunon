@@ -3,7 +3,10 @@ import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/db/server';
 import { getRoadmapData } from '@/lib/services/roadmap-service';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { RoadmapView } from '@/components/roadmap/roadmap-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function RoadmapContent({
   searchParams,
@@ -21,6 +24,11 @@ async function RoadmapContent({
     redirect('/login?next=%2Froadmap');
   }
 
+  const { blocked, profile } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=%2Froadmap');
+
   const data = await getRoadmapData(user.id, goalId);
 
   return (
@@ -28,6 +36,7 @@ async function RoadmapContent({
       goal={data.goal}
       milestones={data.milestones}
       allGoals={data.allGoals}
+      isPro={profile?.isPro ?? false}
     />
   );
 }

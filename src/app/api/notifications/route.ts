@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 
 export async function GET() {
   const supabase = await createClient();
@@ -42,6 +43,9 @@ export async function PATCH(request: Request) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const admin = createAdminClient();
   const body = await request.json().catch(() => ({}));

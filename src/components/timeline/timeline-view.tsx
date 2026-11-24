@@ -28,12 +28,14 @@ interface TimelineViewProps {
     activeDaysCount: number;
     activityMap: Record<number, 'PROOF' | 'MILESTONE'>;
   };
+  isPro?: boolean;
 }
 
 export function TimelineView({
   initialPosts,
   goals,
   calendar,
+  isPro,
 }: Readonly<TimelineViewProps>) {
   const [posts, setPosts] = useState<TimelinePost[]>(initialPosts);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
@@ -237,7 +239,7 @@ export function TimelineView({
           pendingCount: 0,
         }))}
         activeGoalId={activeGoal?.id || goals[0]?.id || ''}
-        isPro={false}
+        isPro={isPro}
         onSelectGoal={(selectedId) => {
           setIsSwitcherOpen(false);
           window.location.href = `/timeline?goalId=${selectedId}`;

@@ -8,7 +8,7 @@ import 'server-only';
 
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
-import { checkAIFirewall } from '@/lib/ai/firewall';
+import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
 import { buildContextPack } from '@/lib/ai/context-pack';
 import { evaluatePersonaProfile } from '@/lib/ai/persona-engine';
 import { Pipeline5WeeklyReviewSchema, type Pipeline5Output } from '@/types/ai-schemas';
@@ -89,13 +89,16 @@ export async function advanceWeek(
     pipeline: 'PIPELINE_5',
     goalId,
   });
+  if (!firewall5.allowed) {
+    throw new AIFirewallError(firewall5.reason || 'FIREWALL_BLOCKED', firewall5.retryAfterSeconds);
+  }
 
   const p5Output = await executeAIPipeline<Pipeline5Output>(
     {
       pipeline: 'PIPELINE_5',
       userId,
       goalId,
-      model: firewall5.allowed ? firewall5.model : 'gemini-3.5-flash-lite',
+      model: firewall5.model,
       language: (user?.language as 'EN' | 'BN') || 'EN',
       country: user?.country || 'BD',
       category: goal.category,

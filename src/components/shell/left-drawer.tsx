@@ -17,10 +17,14 @@ import { InviteFriendsSheet } from './invite-friends-sheet';
 export function LeftDrawer({
   open,
   user,
+  isPro = false,
+  proUntil = null,
   onClose,
 }: Readonly<{
   open: boolean;
   user: User | null;
+  isPro?: boolean;
+  proUntil?: string | null;
   onClose: () => void;
 }>) {
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -85,6 +89,8 @@ export function LeftDrawer({
             {/* Navigation Links */}
             <DrawerLinks
               user={user}
+              isPro={isPro}
+              proUntil={proUntil}
               onNavigate={onClose}
               onOpenInvite={() => setInviteOpen(true)}
             />

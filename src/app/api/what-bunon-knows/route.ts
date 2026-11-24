@@ -7,6 +7,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 import type { DayTimeMap } from '@/types/domain';
 import {
   getWhatBunonKnows,
@@ -43,6 +44,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
+
   const body = (await request.json()) as {
     scope: 'PERSON' | 'DOMAIN' | 'GOAL';
     bucket?: 'knowledge_and_skill_gaps' | 'life_rhythm_and_constraints' | 'what_works_for_this_user' | 'mastered_foundations' | 'past_pivots_and_decisions';
@@ -68,6 +72,9 @@ export async function PATCH(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const body = (await request.json()) as {
     itemId?: string;
@@ -98,6 +105,9 @@ export async function DELETE(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const { searchParams } = new URL(request.url);
   const itemId = searchParams.get('itemId');

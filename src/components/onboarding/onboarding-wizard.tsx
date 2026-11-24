@@ -50,7 +50,7 @@ export function OnboardingWizard() {
   if (state.step === 'FILE_CONTEXT_10B') {
     return (
       <Screen10bFileContext
-        initialFile={state.attachedFile}
+        initialFiles={state.attachedFiles}
         initialText={state.pastedNotes}
         initialOutlineMode={state.outlineMode}
         onBack={() => setState((s) => ({ ...s, step: 'CHOOSE_PATH_10A' }))}

@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
  */
 
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 import { switchPlanStyle } from '@/lib/services/roadmap-service';
 import type { PlanStyle } from '@/types/domain';
 
@@ -23,6 +24,9 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   try {
     const body = await request.json();

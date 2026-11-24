@@ -7,6 +7,8 @@ import { NextResponse } from 'next/server';
  */
 
 import { createClient } from '@/lib/db/server';
+import { AIFirewallError } from '@/lib/ai/firewall';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { replanGoal, abandonGoal } from '@/lib/services/roadmap-service';
 
 export async function POST(
@@ -22,6 +24,9 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   try {
     const body = await request.json();
@@ -40,6 +45,10 @@ export async function POST(
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (err) {
+    if (err instanceof AIFirewallError) {
+      const formatted = formatAIFirewallHttpError(err.reason, err.retryAfterSeconds);
+      return NextResponse.json(formatted.body, { status: formatted.status });
+    }
     const message = err instanceof Error ? err.message : 'Rescue action failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -7,6 +7,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 import { tickSubstep } from '@/lib/services/task-service';
 
 export async function PATCH(
@@ -21,6 +22,9 @@ export async function PATCH(
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const { id: taskId } = await params;
   const body = (await request.json()) as { stepNumber: number; done: boolean };

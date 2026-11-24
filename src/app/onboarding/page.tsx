@@ -10,7 +10,10 @@ import { redirect } from 'next/navigation';
 import { connection } from 'next/server';
 import Link from 'next/link';
 import { createClient } from '@/lib/db/server';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { OnboardingWizard } from '@/components/onboarding/onboarding-wizard';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function OnboardingContent() {
   await connection();
@@ -23,15 +26,13 @@ async function OnboardingContent() {
     redirect('/login?next=%2Fonboarding');
   }
 
-  // Check user subscription & active goal count
-  const { data: profile } = await supabase
-    .from('users')
-    .select('pro_until')
-    .eq('id', user.id)
-    .single();
+  const { blocked, profile, settings } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=%2Fonboarding');
 
-  const isPro = Boolean(profile?.pro_until && new Date(profile.pro_until) > new Date());
-  const maxGoals = isPro ? 3 : 1;
+  const isPro = profile?.isPro ?? false;
+  const maxGoals = isPro ? settings.pro_roadmap_allowance : settings.free_roadmap_allowance;
 
   const { count: activeGoalCount } = await supabase
     .from('goals')

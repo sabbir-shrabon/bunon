@@ -33,10 +33,10 @@ export function useOnboardingWizard() {
     }));
   };
 
-  const handleFileContext = (file: File | null, pastedText: string, outlineMode: OutlineMode) => {
+  const handleFileContext = (files: File[], pastedText: string, outlineMode: OutlineMode) => {
     setState((s) => ({
       ...s,
-      attachedFile: file,
+      attachedFiles: files,
       pastedNotes: pastedText,
       outlineMode,
       step: 'Q2_DEADLINE',

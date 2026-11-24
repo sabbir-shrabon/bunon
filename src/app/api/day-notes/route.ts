@@ -7,6 +7,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 import { logDayNote, getTodayDayNote } from '@/lib/services/day-note-service';
 
 export async function GET(request: NextRequest) {
@@ -39,6 +40,9 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
 
   const body = (await request.json()) as { goalId: string; text: string };
 

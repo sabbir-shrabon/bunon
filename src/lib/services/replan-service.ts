@@ -8,7 +8,7 @@ import 'server-only';
 
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
-import { checkAIFirewall } from '@/lib/ai/firewall';
+import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
 import { buildContextPack } from '@/lib/ai/context-pack';
 import { Pipeline6ReplanSchema, type Pipeline6Output } from '@/types/ai-schemas';
 
@@ -52,6 +52,9 @@ export async function replanGoal(
   );
 
   const firewall = await checkAIFirewall({ userId, pipeline: 'PIPELINE_6', goalId });
+  if (!firewall.allowed) {
+    throw new AIFirewallError(firewall.reason || 'FIREWALL_BLOCKED', firewall.retryAfterSeconds);
+  }
   const deadlineDate = newDeadline || goal.deadline;
 
   const p6Output = await executeAIPipeline<Pipeline6Output>(
@@ -59,7 +62,7 @@ export async function replanGoal(
       pipeline: 'PIPELINE_6',
       userId,
       goalId,
-      model: firewall.allowed ? firewall.model : 'gemini-3.5-flash-lite',
+      model: firewall.model,
       language: (user?.language as 'EN' | 'BN') || 'EN',
       country: user?.country || 'BD',
       category: goal.category,

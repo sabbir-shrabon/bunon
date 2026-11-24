@@ -3,7 +3,10 @@ import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/db/server';
 import { getTimelineFeed, getMonthActivity } from '@/lib/services/timeline-service';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { TimelineView } from '@/components/timeline/timeline-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function TimelineContent({
   searchParams,
@@ -21,6 +24,11 @@ async function TimelineContent({
     redirect('/login?next=%2Ftimeline');
   }
 
+  const { blocked, profile } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=%2Ftimeline');
+
   const validProofTypes = ['ALL', 'PHOTO', 'LINK', 'NOTE'] as const;
   const cleanProofType =
     proofType && (validProofTypes as readonly string[]).includes(proofType)
@@ -35,6 +43,7 @@ async function TimelineContent({
       initialPosts={feed.posts}
       goals={feed.goals}
       calendar={calendar}
+      isPro={profile?.isPro ?? false}
     />
   );
 }

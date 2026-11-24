@@ -25,9 +25,12 @@ import {
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { useAppPreferences } from '@/lib/i18n/app-preferences';
+import { isUserProActive } from '@/lib/auth/entitlement';
 
 type DrawerLinksProps = {
   user: User | null;
+  isPro?: boolean;
+  proUntil?: string | null;
   onNavigate?: () => void;
   onOpenInvite?: () => void;
 };
@@ -46,11 +49,14 @@ const bottomStaticLinks = [
 
 export function DrawerLinks({
   user,
+  isPro = false,
+  proUntil = null,
   onNavigate,
   onOpenInvite,
 }: Readonly<DrawerLinksProps>) {
   const router = useRouter();
   const { theme, language, setTheme, setLanguage } = useAppPreferences();
+  const activePro = Boolean(user && (isPro || isUserProActive(proUntil)));
 
   const handleSignOut = async () => {
     await fetch('/api/auth/signout', { method: 'POST' });
@@ -174,11 +180,17 @@ export function DrawerLinks({
             className="flex items-center justify-between py-1.5 text-ink hover:text-muted transition-colors group"
           >
             <div className="flex items-center gap-2.5">
-              <Sparkles size={16} className="text-muted group-hover:text-ink transition-colors" />
+              <Sparkles size={16} className={activePro ? 'text-[#FFB020]' : 'text-muted group-hover:text-ink transition-colors'} />
               <span className="text-[13.5px] font-normal leading-[19px]">Pro</span>
             </div>
-            <span className="rounded-full bg-secondary-surface px-2 py-0.5 text-[10.5px] font-medium text-muted">
-              Free plan
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
+                activePro
+                  ? 'bg-[#FFB020]/15 text-ink border border-[#FFB020]/40'
+                  : 'bg-secondary-surface text-muted'
+              }`}
+            >
+              {activePro ? 'Pro' : 'Free plan'}
             </span>
           </Link>
         </div>

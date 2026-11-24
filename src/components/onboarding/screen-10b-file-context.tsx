@@ -21,54 +21,88 @@ function formatFileSize(bytes: number): string {
 }
 
 interface Screen10bFileContextProps {
-  initialFile: File | null;
+  initialFiles: File[];
   initialText: string;
   initialOutlineMode: OutlineMode;
   onBack: () => void;
-  onContinue: (file: File | null, pastedText: string, outlineMode: OutlineMode) => void;
+  onContinue: (files: File[], pastedText: string, outlineMode: OutlineMode) => void;
 }
 
 export function Screen10bFileContext({
-  initialFile,
+  initialFiles,
   initialText,
   initialOutlineMode,
   onBack,
   onContinue,
 }: Readonly<Screen10bFileContextProps>) {
-  const [file, setFile] = useState<File | null>(initialFile);
+  const [files, setFiles] = useState<File[]>(initialFiles);
   const [pastedText, setPastedText] = useState(initialText);
   const [outlineMode, setOutlineMode] = useState<OutlineMode>(initialOutlineMode || 'FOLLOW_OUTLINE');
+  const [maxFiles, setMaxFiles] = useState(1);
   const [maxFileSizeBytes, setMaxFileSizeBytes] = useState(5242880);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch('/api/onboarding/limits')
+    fetch('/api/onboarding/limits', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (typeof data?.maxFileSizeBytes === 'number') setMaxFileSizeBytes(data.maxFileSizeBytes);
+        if (typeof data?.maxFiles === 'number' && data.maxFiles >= 1) {
+          setMaxFiles(data.maxFiles);
+        }
+        if (typeof data?.maxFileSizeBytes === 'number' && data.maxFileSizeBytes > 0) {
+          setMaxFileSizeBytes(data.maxFileSizeBytes);
+        }
       })
       .catch(() => {});
   }, []);
 
-  const validateAndSetFile = (candidate: File | null) => {
-    if (!candidate) return;
+  const addCandidateFiles = (incoming: FileList | File[] | null) => {
+    if (!incoming || incoming.length === 0) return;
     setError(null);
-    if (candidate.size > maxFileSizeBytes) {
-      setError(`File is too large. Max limit is ${formatFileSize(maxFileSizeBytes)}.`);
+    const list = Array.from(incoming);
+
+    for (const candidate of list) {
+      if (candidate.size > maxFileSizeBytes) {
+        setError(`"${candidate.name}" is too large. Max limit is ${formatFileSize(maxFileSizeBytes)} per file.`);
+        return;
+      }
+    }
+
+    if (maxFiles === 1) {
+      setFiles([list[0]]);
       return;
     }
-    setFile(candidate);
+
+    const merged = [...files];
+    for (const candidate of list) {
+      const alreadyAdded = merged.some(
+        (existing) => existing.name === candidate.name && existing.size === candidate.size
+      );
+      if (alreadyAdded) continue;
+      if (merged.length >= maxFiles) {
+        setError(`You can attach up to ${maxFiles} files.`);
+        break;
+      }
+      merged.push(candidate);
+    }
+    setFiles(merged);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setError(null);
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files?.[0]) validateAndSetFile(e.dataTransfer.files[0]);
+    addCandidateFiles(e.dataTransfer.files);
   };
 
-  const canContinue = Boolean(file || pastedText.trim().length >= 15);
+  const canContinue = Boolean(files.length > 0 || pastedText.trim().length >= 15);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +110,11 @@ export function Screen10bFileContext({
       setError('Please attach a file or paste at least 15 characters of notes.');
       return;
     }
-    onContinue(file, pastedText.trim(), outlineMode);
+    if (files.length > maxFiles) {
+      setError(`You can attach up to ${maxFiles} ${maxFiles === 1 ? 'file' : 'files'}.`);
+      return;
+    }
+    onContinue(files, pastedText.trim(), outlineMode);
   };
 
   return (
@@ -95,33 +133,45 @@ export function Screen10bFileContext({
             </div>
 
             <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-ink uppercase tracking-wider">
-                Upload context file (optional)
-              </label>
-              {file ? (
-                <div className="flex items-center justify-between p-3.5 rounded-xl border border-hairline bg-secondary-surface/60">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-9 w-9 rounded-lg bg-card border border-hairline flex items-center justify-center shrink-0 text-ink">
-                      <FileText className="w-4 h-4" />
+              <div className="flex items-center justify-between">
+                <label className="text-[12px] font-medium text-ink uppercase tracking-wider">
+                  Upload context {maxFiles > 1 ? 'files' : 'file'} (optional)
+                </label>
+                <span className="text-[11px] text-muted">
+                  {files.length} / {maxFiles} {maxFiles === 1 ? 'file' : 'files'}
+                </span>
+              </div>
+
+              {files.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {files.map((f, idx) => (
+                    <div
+                      key={`${f.name}-${f.size}-${idx}`}
+                      className="flex items-center justify-between p-3.5 rounded-xl border border-hairline bg-secondary-surface/60"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-9 w-9 rounded-lg bg-card border border-hairline flex items-center justify-center shrink-0 text-ink">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-medium text-ink truncate">{f.name}</p>
+                          <p className="text-[11px] text-muted">{formatFileSize(f.size)}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(idx)}
+                        className="p-1 rounded-full text-muted hover:text-ink hover:bg-card transition-colors cursor-pointer"
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium text-ink truncate">{file.name}</p>
-                      <p className="text-[11px] text-muted">{formatFileSize(file.size)}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFile(null);
-                      if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                    className="p-1 rounded-full text-muted hover:text-ink hover:bg-card transition-colors cursor-pointer"
-                    aria-label="Remove attached file"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  ))}
                 </div>
-              ) : (
+              )}
+
+              {(files.length < maxFiles || maxFiles === 1 && files.length === 0) && (
                 <div
                   onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                   onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
@@ -134,17 +184,23 @@ export function Screen10bFileContext({
                   <input
                     ref={fileInputRef}
                     type="file"
+                    multiple={maxFiles > 1}
                     accept={ACCEPTED_EXTENSIONS}
                     className="hidden"
-                    onChange={(e) => { if (e.target.files?.[0]) validateAndSetFile(e.target.files[0]); }}
+                    onChange={(e) => {
+                      addCandidateFiles(e.target.files);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
                   />
                   <div className="h-10 w-10 rounded-full bg-secondary-surface flex items-center justify-center text-muted">
                     <UploadCloud className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="text-[13px] font-medium text-ink hover:underline">Choose file or drag & drop</span>
+                    <span className="text-[13px] font-medium text-ink hover:underline">
+                      {files.length > 0 ? 'Add another file or drag & drop' : 'Choose file or drag & drop'}
+                    </span>
                     <p className="text-[11px] text-muted mt-0.5">
-                      PDF, DOCX, TXT, MD, or photo up to {formatFileSize(maxFileSizeBytes)}
+                      PDF, DOCX, TXT, MD, or photo · Up to {maxFiles} {maxFiles === 1 ? 'file' : 'files'}, {formatFileSize(maxFileSizeBytes)} each
                     </p>
                   </div>
                 </div>
@@ -188,7 +244,7 @@ export function Screen10bFileContext({
                     {outlineMode === 'FOLLOW_OUTLINE' && <Check className="w-3.5 h-3.5 text-ink shrink-0" />}
                   </div>
                   <p className="text-[11px] text-muted leading-snug">
-                    Preserves your chapters & sequence across the milestones.
+                    Preserves your chapters &amp; sequence across the milestones.
                   </p>
                 </button>
 

@@ -11,7 +11,7 @@ import type { Pipeline1Output, Pipeline1BOutput, Pipeline2Output } from '@/types
 export const INITIAL_ONBOARDING_STATE: OnboardingState = {
   step: 'CHOOSE_PATH_10A',
   entryPath: 'FILE_NOTES',
-  attachedFile: null,
+  attachedFiles: [],
   pastedNotes: '',
   outlineMode: 'FOLLOW_OUTLINE',
   extractedOutlineSummary: '',
@@ -70,8 +70,8 @@ export async function submitContextIngest(
   hoursPerDay: number
 ): Promise<Pipeline1BOutput> {
   const formData = new FormData();
-  if (state.attachedFile) {
-    formData.append('file', state.attachedFile);
+  for (const file of state.attachedFiles) {
+    formData.append('files', file);
   }
   if (state.pastedNotes) {
     formData.append('pastedText', state.pastedNotes);

@@ -9,7 +9,10 @@ import { Suspense } from 'react';
 import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/db/server';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { SettingsView } from '@/components/settings/settings-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function SettingsContent() {
   await connection();
@@ -21,6 +24,11 @@ async function SettingsContent() {
   if (!user) {
     redirect('/login?next=/settings');
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=/settings');
 
   const { data: profile } = await supabase
     .from('users')

@@ -31,10 +31,10 @@ export async function POST(
     return NextResponse.json({ error: 'Proof type required' }, { status: 400 });
   }
 
-  if (resolvedType === 'PHOTO') {
+  if (resolvedType === 'PHOTO' || resolvedType === 'VIDEO' || resolvedType === 'FILE') {
     if (!body.storagePath || typeof body.storagePath !== 'string' || body.storagePath.startsWith('blob:')) {
       return NextResponse.json(
-        { error: 'PHOTO_STORAGE_PATH_REQUIRED', message: 'Valid photo storage path is required' },
+        { error: 'PHOTO_STORAGE_PATH_REQUIRED', message: 'Valid storage path is required for uploaded proof' },
         { status: 400 }
       );
     }
@@ -47,7 +47,13 @@ export async function POST(
 
   if (!result.success) {
     console.error('[tasks/complete error]', { taskId, error: result.error });
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    const status =
+      result.error === 'MAINTENANCE_MODE'
+        ? 503
+        : result.error === 'ACCOUNT_SUSPENDED' || result.error === 'PRO_REQUIRED' || result.error === 'USER_INACTIVE'
+          ? 403
+          : 400;
+    return NextResponse.json({ error: result.error }, { status });
   }
 
   // Invalidate Next.js server cache across the 3 main views immediately

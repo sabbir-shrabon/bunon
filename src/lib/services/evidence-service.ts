@@ -8,9 +8,18 @@ import 'server-only';
 
 import { createAdminClient } from '@/lib/db/admin';
 import { safeExternalUrl } from '@/lib/security';
+import { isUserProActive } from '@/lib/auth/entitlement';
+import { getSystemSettings } from '@/lib/services/system-settings.service';
 import type { EvidenceType, TaskStatus } from '@/types/domain';
 import type { TaskRow } from '@/types/db/goal-tables';
 import type { EvidenceRow } from '@/types/db/evidence-tables';
+
+export interface ProofUploadLimits {
+  maxFileSizeBytes: number;
+  storageQuotaBytes: number;
+  maxVideoDurationSeconds: number;
+  isPro: boolean;
+}
 
 export interface ProofUploadUrlRequest {
   fileName: string;
@@ -27,7 +36,19 @@ export interface ProofUploadUrlResult {
   storagePath?: string;
   path?: string;
   token?: string;
-  error?: 'TASK_NOT_FOUND' | 'PRO_REQUIRED' | 'DAILY_PHOTO_LIMIT' | 'FILE_TOO_LARGE' | 'STORAGE_FULL' | string;
+  limits?: ProofUploadLimits;
+  error?:
+    | 'TASK_NOT_FOUND'
+    | 'USER_NOT_FOUND'
+    | 'ACCOUNT_SUSPENDED'
+    | 'USER_INACTIVE'
+    | 'MAINTENANCE_MODE'
+    | 'PRO_REQUIRED'
+    | 'DAILY_PHOTO_LIMIT'
+    | 'FILE_TOO_LARGE'
+    | 'VIDEO_TOO_LONG'
+    | 'STORAGE_FULL'
+    | string;
 }
 
 export async function requestProofUploadUrl(
@@ -36,6 +57,11 @@ export async function requestProofUploadUrl(
   req: ProofUploadUrlRequest
 ): Promise<ProofUploadUrlResult> {
   const admin = createAdminClient();
+  const settings = await getSystemSettings({ fresh: true });
+
+  if (settings.full_maintenance_mode) {
+    return { success: false, error: 'MAINTENANCE_MODE' };
+  }
 
   // 1. Verify task ownership
   const { data: task, error: taskError } = await admin
@@ -54,21 +80,34 @@ export async function requestProofUploadUrl(
 
   if (goalErr || !goal || goal.user_id !== userId) return { success: false, error: 'TASK_NOT_FOUND' };
 
-  // 2. Fetch user pro status & storage usage
+  // 2. Fetch user status, pro status & storage usage
   const { data: user, error: userError } = await admin
     .from('users')
-    .select('pro_until, storage_used_bytes')
+    .select('status, pro_until, storage_used_bytes')
     .eq('id', userId)
     .single();
 
   if (userError || !user) return { success: false, error: 'USER_NOT_FOUND' };
+  if (user.status === 'SUSPENDED') return { success: false, error: 'ACCOUNT_SUSPENDED' };
+  if (user.status !== 'ACTIVE') return { success: false, error: 'USER_INACTIVE' };
 
-  const isPro = Boolean(user.pro_until && new Date(user.pro_until) > new Date());
+  const isPro = isUserProActive(user.pro_until);
   const resolvedType = req.type || req.proofType || 'PHOTO';
+  const maxFileBytes = Number(settings.max_file_size_bytes) || 10 * 1024 * 1024;
+  const quotaBytes = isPro
+    ? Number(settings.pro_storage_quota_bytes) || 2 * 1024 * 1024 * 1024
+    : Number(settings.free_storage_quota_bytes) || 50 * 1024 * 1024;
+  const maxVideoDurationSeconds = Number(settings.max_video_duration_seconds) || 30;
+  const limits: ProofUploadLimits = {
+    maxFileSizeBytes: maxFileBytes,
+    storageQuotaBytes: quotaBytes,
+    maxVideoDurationSeconds,
+    isPro,
+  };
 
   // 3. Pro-locked features check (Video and File/PDF require Pro)
   if (!isPro && (resolvedType === 'VIDEO' || resolvedType === 'FILE')) {
-    return { success: false, error: 'PRO_REQUIRED' };
+    return { success: false, error: 'PRO_REQUIRED', limits };
   }
 
   // 4. Free user 1-photo per day limit check
@@ -85,21 +124,28 @@ export async function requestProofUploadUrl(
       .limit(1);
 
     if (todayPhotos && todayPhotos.length >= 1) {
-      return { success: false, error: 'DAILY_PHOTO_LIMIT' };
+      return { success: false, error: 'DAILY_PHOTO_LIMIT', limits };
     }
   }
 
-  // 5. Single-file cap: 10 MB default
-  const maxFileBytes = 10 * 1024 * 1024;
+  // 5. Single-file cap from live system_settings
   if (req.fileSizeBytes > maxFileBytes) {
-    return { success: false, error: 'FILE_TOO_LARGE' };
+    return { success: false, error: 'FILE_TOO_LARGE', limits };
   }
 
-  // 6. Total Storage Quota (50 MB Free / 2 GB Pro)
-  const quotaBytes = isPro ? 2 * 1024 * 1024 * 1024 : 50 * 1024 * 1024;
+  // 6. Video duration cap from live system_settings
+  if (
+    resolvedType === 'VIDEO' &&
+    typeof req.durationSeconds === 'number' &&
+    req.durationSeconds > maxVideoDurationSeconds
+  ) {
+    return { success: false, error: 'VIDEO_TOO_LONG', limits };
+  }
+
+  // 7. Total Storage Quota from live system_settings
   const currentBytes = Number(user.storage_used_bytes) || 0;
   if (currentBytes + req.fileSizeBytes > quotaBytes) {
-    return { success: false, error: 'STORAGE_FULL' };
+    return { success: false, error: 'STORAGE_FULL', limits };
   }
 
   // 7. Generate 60-Second Signed Upload URL
@@ -148,6 +194,7 @@ export async function requestProofUploadUrl(
       path,
       storagePath: path,
       token: signedData?.token,
+      limits,
     };
   } catch (err) {
     try {
@@ -204,6 +251,34 @@ export async function completeTaskWithEvidence(
   payload: CompleteTaskPayload
 ): Promise<CompleteTaskResult> {
   const admin = createAdminClient();
+  const settings = await getSystemSettings({ fresh: true });
+  if (settings.full_maintenance_mode) {
+    return { success: false, error: 'MAINTENANCE_MODE' };
+  }
+
+  const { data: userStatusRow } = await admin
+    .from('users')
+    .select('status, pro_until')
+    .eq('id', userId)
+    .single();
+
+  if (!userStatusRow || userStatusRow.status === 'SUSPENDED') {
+    return { success: false, error: userStatusRow?.status === 'SUSPENDED' ? 'ACCOUNT_SUSPENDED' : 'USER_INACTIVE' };
+  }
+  if (userStatusRow.status !== 'ACTIVE') {
+    return { success: false, error: 'USER_INACTIVE' };
+  }
+
+  const isPro = isUserProActive(userStatusRow.pro_until);
+  if (!isPro && (payload.type === 'VIDEO' || payload.type === 'FILE')) {
+    return { success: false, error: 'PRO_REQUIRED' };
+  }
+
+  const maxVideoDuration = Number(settings.max_video_duration_seconds) || 30;
+  const clampedDuration =
+    payload.type === 'VIDEO' && typeof payload.durationSeconds === 'number'
+      ? Math.min(Math.max(1, Math.round(payload.durationSeconds)), Math.min(30, maxVideoDuration))
+      : payload.durationSeconds || null;
 
   const { data: task, error: taskError } = await admin
     .from('tasks')
@@ -224,9 +299,9 @@ export async function completeTaskWithEvidence(
   const todayStr = new Date().toISOString().split('T')[0];
   const nowStr = new Date().toISOString();
 
-  // 1. Validate & sanitize storage_path for PHOTO proof
+  // 1. Validate & sanitize storage_path for media/file proof types
   let cleanStoragePath: string | null = null;
-  if (payload.type === 'PHOTO') {
+  if (payload.type === 'PHOTO' || payload.type === 'VIDEO' || payload.type === 'FILE') {
     if (!payload.storagePath || typeof payload.storagePath !== 'string') {
       return { success: false, error: 'PHOTO_STORAGE_PATH_REQUIRED' };
     }
@@ -258,7 +333,7 @@ export async function completeTaskWithEvidence(
       .exists(normalized);
 
     if (existsErr || !existsData) {
-      console.error('[storage photo existence check failed]', { path: normalized, existsErr, existsData });
+      console.error('[storage proof existence check failed]', { path: normalized, existsErr, existsData });
       return { success: false, error: 'PHOTO_NOT_FOUND_IN_STORAGE' };
     }
 
@@ -288,7 +363,7 @@ export async function completeTaskWithEvidence(
       storage_path: cleanStoragePath,
       external_url: cleanExternalUrl,
       file_size_bytes: payload.fileSizeBytes || 0,
-      duration_seconds: payload.durationSeconds || null,
+      duration_seconds: clampedDuration,
       caption_note: payload.captionNote || null,
       measured_value: payload.measuredValue || null,
       visibility: 'PRIVATE',

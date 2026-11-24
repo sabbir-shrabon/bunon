@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/db/admin';
 import { createClient } from '@/lib/db/server';
+import { guardApiRoute } from '@/lib/services/access-guard.service';
 
 const ticketSchema = z.object({
   kind: z.enum(['FEEDBACK', 'SUPPORT']),
@@ -30,6 +31,10 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
+
+  // Suspended users are allowed to submit Help & Support appeals (Screen 122)
+  const guard = await guardApiRoute(user.id, { allowSuspended: true });
+  if (!guard.ok) return guard.response;
 
   try {
     const body = (await request.json()) as unknown;

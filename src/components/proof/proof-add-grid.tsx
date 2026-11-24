@@ -8,6 +8,7 @@
 'use client';
 
 interface ProofAddGridProps {
+  isPro?: boolean;
   onCameraClick: () => void;
   onGalleryClick: () => void;
   onLinkClick: () => void;
@@ -16,6 +17,7 @@ interface ProofAddGridProps {
 }
 
 export function ProofAddGrid({
+  isPro = false,
   onCameraClick,
   onGalleryClick,
   onLinkClick,
@@ -77,7 +79,7 @@ export function ProofAddGrid({
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
           </svg>
           <span className="mt-1 text-[12px] font-medium text-ink">Video</span>
-          <span className="text-[10px] text-muted">Pro</span>
+          {!isPro && <span className="text-[10px] text-muted">Pro</span>}
         </button>
 
         {/* File (Pro) */}
@@ -91,7 +93,7 @@ export function ProofAddGrid({
             <polyline points="14 2 14 8 20 8" />
           </svg>
           <span className="mt-1 text-[12px] font-medium text-ink">File</span>
-          <span className="text-[10px] text-muted">Pro</span>
+          {!isPro && <span className="text-[10px] text-muted">Pro</span>}
         </button>
       </div>
     </div>

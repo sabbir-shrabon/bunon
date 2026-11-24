@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { PrimaryButton } from '@/components/ui/primary-button';
+import { useAuthSession } from '@/components/shell/auth-session';
 import type { TodayGoalItem } from './types';
 
 interface GoalSwitcherSheetProps {
@@ -27,16 +28,18 @@ export function GoalSwitcherSheet({
   onClose,
   goals,
   activeGoalId,
-  isPro = false,
+  isPro,
   onSelectGoal,
 }: Readonly<GoalSwitcherSheetProps>) {
   const router = useRouter();
+  const { isPro: sessionIsPro } = useAuthSession();
+  const effectiveIsPro = isPro ?? sessionIsPro;
   const [showGate, setShowGate] = useState(false);
 
   if (!isOpen) return null;
 
   const handleAddGoal = () => {
-    const maxAllowed = isPro ? 3 : 1;
+    const maxAllowed = effectiveIsPro ? 3 : 1;
     if (goals.length >= maxAllowed) {
       setShowGate(true);
     } else {
@@ -51,18 +54,18 @@ export function GoalSwitcherSheet({
         /* Sheet 32: Add another goal gate */
         <div className="flex flex-col gap-4 text-center py-2">
           <h3 className="text-[17px] font-semibold text-ink">
-            {isPro
+            {effectiveIsPro
               ? 'You have 3 active goals'
               : 'Free plan limit reached'}
           </h3>
           <p className="text-[13px] text-muted leading-relaxed px-4">
-            {isPro
+            {effectiveIsPro
               ? 'Finish or pause one of your active goals before starting a new one.'
               : 'Free accounts track 1 goal at a time with full focus. Upgrade to Pro for up to 3 active goals.'}
           </p>
 
           <div className="pt-2 flex flex-col gap-2">
-            {!isPro && (
+            {!effectiveIsPro && (
               <PrimaryButton onClick={() => router.push('/upgrade')}>
                 Upgrade to Bunon Pro
               </PrimaryButton>

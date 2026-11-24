@@ -17,8 +17,12 @@ import { InviteFriendsSheet } from './invite-friends-sheet';
 
 export function DesktopSidebar({
   user,
+  isPro = false,
+  proUntil = null,
 }: Readonly<{
   user: User | null;
+  isPro?: boolean;
+  proUntil?: string | null;
 }>) {
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -59,6 +63,8 @@ export function DesktopSidebar({
           <div className="px-2 py-1">
             <DrawerLinks
               user={user}
+              isPro={isPro}
+              proUntil={proUntil}
               onOpenInvite={() => setInviteOpen(true)}
             />
           </div>

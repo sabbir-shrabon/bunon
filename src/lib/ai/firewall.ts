@@ -3,10 +3,12 @@ import 'server-only';
  * 1. Purpose: Enforces the 4-Gate AI Token Firewall before calling Google Gemini.
  * 2. Spec Ref: Database Schema v2.5 Section 2 (Gates 1, 2, 3, 4).
  * 3. Called By: AI Service Layer assembler and route handlers.
- * 4. Calls: Admin Supabase client and system settings.
+ * 4. Calls: Admin Supabase client and cached system_settings (TTL <= 60s).
  */
 
 import { createAdminClient } from '@/lib/db/admin';
+import { isUserProActive } from '@/lib/auth/entitlement';
+import { getSystemSettings } from '@/lib/services/system-settings.service';
 import type { AIPipelineKey } from '@/types/domain';
 
 // In-memory sliding window rate limiter
@@ -31,6 +33,18 @@ function checkRateWindow(
   bucket.timestamps.push(now);
   map.set(key, bucket);
   return true;
+}
+
+export class AIFirewallError extends Error {
+  readonly reason: string;
+  readonly retryAfterSeconds?: number;
+
+  constructor(reason: string, retryAfterSeconds?: number) {
+    super(reason);
+    this.name = 'AIFirewallError';
+    this.reason = reason;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
 }
 
 export interface FirewallCheckParams {
@@ -73,6 +87,11 @@ export async function checkAIFirewall(
   params: FirewallCheckParams
 ): Promise<FirewallDecision> {
   const admin = createAdminClient();
+  const settings = await getSystemSettings();
+
+  if (settings.full_maintenance_mode) {
+    return { allowed: false, model: '', reason: 'MAINTENANCE_MODE' };
+  }
 
   // --- Gate 1: Active User & Input Caps ---
   const { data: user, error: userError } = await admin
@@ -81,7 +100,15 @@ export async function checkAIFirewall(
     .eq('id', params.userId)
     .single();
 
-  if (userError || !user || user.status !== 'ACTIVE') {
+  if (userError || !user) {
+    return { allowed: false, model: '', reason: 'USER_INACTIVE' };
+  }
+
+  if (user.status === 'SUSPENDED') {
+    return { allowed: false, model: '', reason: 'ACCOUNT_SUSPENDED' };
+  }
+
+  if (user.status !== 'ACTIVE') {
     return { allowed: false, model: '', reason: 'USER_INACTIVE' };
   }
 
@@ -106,14 +133,16 @@ export async function checkAIFirewall(
     }
   }
 
-  // --- Gate 2: Sliding-Window Rate Limiter ---
+  // --- Gate 2: Sliding-Window Rate Limiter (live ai_rate_limit_per_min) ---
   if (!params.isRetry) {
-    const userAllowed = checkRateWindow(userRateLimits, params.userId, 5);
+    const rateLimitPerMin = Math.max(1, Number(settings.ai_rate_limit_per_min) || 5);
+    const userAllowed = checkRateWindow(userRateLimits, params.userId, rateLimitPerMin);
     if (!userAllowed) {
       return { allowed: false, model: '', reason: 'RATE_LIMITED', retryAfterSeconds: 30 };
     }
     if (params.userIp) {
-      const ipAllowed = checkRateWindow(ipRateLimits, params.userIp, 10);
+      const ipLimit = Math.max(rateLimitPerMin * 2, 10);
+      const ipAllowed = checkRateWindow(ipRateLimits, params.userIp, ipLimit);
       if (!ipAllowed) {
         return { allowed: false, model: '', reason: 'RATE_LIMITED', retryAfterSeconds: 30 };
       }
@@ -121,7 +150,7 @@ export async function checkAIFirewall(
   }
 
   // --- Gate 3: Feature Allowance Check ---
-  const isPro = Boolean(user.pro_until && new Date(user.pro_until) > new Date());
+  const isPro = isUserProActive(user.pro_until);
 
   if (params.pipeline === 'PIPELINE_2' && params.goalId && !params.isRetry) {
     const { data: goal } = await admin
@@ -132,54 +161,80 @@ export async function checkAIFirewall(
 
     // If regeneration (previous_roadmap_json exists), check allowance
     if (goal?.previous_roadmap_json && !isPro) {
-      // Free user already used their 1 free regeneration
       return { allowed: false, model: '', reason: 'ALLOWANCE_EXCEEDED' };
     }
   }
 
-  // --- Gate 4: Spend Caps & Graceful Model Downgrade ---
-  const { data: settings } = await admin
-    .from('system_settings')
-    .select('*')
-    .eq('id', 1)
-    .single();
-
-  if (settings?.ai_kill_switch) {
+  // --- Gate 4: Kill Switch, Daily & Monthly Spend Caps, Graceful Model Downgrade ---
+  if (settings.ai_kill_switch) {
     return { allowed: false, model: '', reason: 'AI_KILL_SWITCH_ACTIVE' };
   }
 
-  // Calculate today's spend from ai_calls
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
-  const { data: dailyCalls } = await admin
-    .from('ai_calls')
-    .select('cost_usd')
-    .gte('created_at', todayStart.toISOString());
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+
+  const [{ data: dailyCalls }, { data: userMonthlyCalls }] = await Promise.all([
+    admin
+      .from('ai_calls')
+      .select('cost_usd')
+      .gte('created_at', todayStart.toISOString()),
+    admin
+      .from('ai_calls')
+      .select('cost_usd')
+      .eq('user_id', params.userId)
+      .gte('created_at', monthStart.toISOString()),
+  ]);
 
   const dailySpend = (dailyCalls || []).reduce((acc, c) => acc + (Number(c.cost_usd) || 0), 0);
-  const dailyCap = settings?.global_daily_ai_cap_usd || 5.0;
+  const userMonthlySpend = (userMonthlyCalls || []).reduce(
+    (acc, c) => acc + (Number(c.cost_usd) || 0),
+    0
+  );
 
-  // Determine target model
+  const dailyCap = Number(settings.global_daily_ai_cap_usd) || 5.0;
+  const monthlyCap = isPro
+    ? Number(settings.pro_monthly_ai_cap_usd) || 0.8
+    : Number(settings.free_monthly_ai_cap_usd) || 0.15;
+  const gracefulFallback = settings.graceful_model_fallback_enabled ?? true;
+
+  // Determine target model from live pipeline_models_json
   const defaultModel =
-    settings?.pipeline_models_json?.[params.pipeline] ||
-    settings?.active_gemini_model ||
+    settings.pipeline_models_json?.[params.pipeline] ||
+    settings.active_gemini_model ||
     'gemini-3.5-flash-lite';
 
   let selectedModel = defaultModel;
 
-  // Normalize legacy/deprecated models that Gemini API rejects for new users
+  // Normalize legacy/deprecated models that Gemini API rejects
   if (selectedModel.includes('2.5') || selectedModel.includes('2.0') || selectedModel.includes('1.5')) {
     selectedModel = 'gemini-3.5-flash-lite';
   }
 
-  // Check 80% threshold for graceful downgrade
-  if (dailySpend >= dailyCap * 0.8) {
-    if (settings?.graceful_model_fallback_enabled ?? true) {
-      selectedModel = 'gemini-3.5-flash-lite';
-    } else if (dailySpend >= dailyCap) {
-      return { allowed: false, model: '', reason: 'DAILY_CAP_EXCEEDED' };
+  // Global Daily Cap enforcement
+  if (dailyCap > 0 && dailySpend >= dailyCap) {
+    return { allowed: false, model: '', reason: 'DAILY_CAP_EXCEEDED' };
+  }
+  if (dailyCap > 0 && dailySpend >= dailyCap * 0.8 && gracefulFallback) {
+    selectedModel = 'gemini-3.5-flash-lite';
+  }
+
+  // Per-User Monthly Cap enforcement (rations optional pipelines once reached)
+  const isOptionalPipeline =
+    params.pipeline === 'PIPELINE_4' ||
+    params.pipeline === 'PIPELINE_6' ||
+    (params.pipeline === 'PIPELINE_2' && Boolean(params.isRetry));
+
+  if (monthlyCap > 0 && userMonthlySpend >= monthlyCap) {
+    if (isOptionalPipeline || !gracefulFallback) {
+      return { allowed: false, model: '', reason: 'MONTHLY_CAP_EXCEEDED' };
     }
+    selectedModel = 'gemini-3.5-flash-lite';
+  } else if (monthlyCap > 0 && userMonthlySpend >= monthlyCap * 0.8 && gracefulFallback) {
+    selectedModel = 'gemini-3.5-flash-lite';
   }
 
   return {

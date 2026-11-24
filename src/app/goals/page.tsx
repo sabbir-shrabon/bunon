@@ -11,7 +11,10 @@ import Link from 'next/link';
 import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { getUserGoals } from '@/lib/services/journey-service';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { AppShell } from '@/components/shell/app-shell';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 async function GoalsContent() {
   await connection();
@@ -23,6 +26,11 @@ async function GoalsContent() {
   if (!user) {
     redirect('/login?next=%2Fgoals');
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect('/login?next=%2Fgoals');
 
   const goals = await getUserGoals(user.id);
 

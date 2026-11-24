@@ -1,8 +1,8 @@
 /**
- * 1. Purpose: Server Component loading pricing plans, regional currency & platform in Suspense.
+ * 1. Purpose: Server Component loading pricing plans, regional currency, Pro status & platform in Suspense.
  * 2. Spec Ref: Screen 104 Pro Upgrade page in Stitch UI Design Guide Category I & Milestone 5.5.
  * 3. Called By: Next.js App Router for '/pro' and '/upgrade'.
- * 4. Calls: connection, createAdminClient, createClient, usePlatform, ProPricingView.
+ * 4. Calls: connection, createAdminClient, createClient, getPageAccessState, usePlatform, ProPricingView.
  */
 
 import { Suspense } from 'react';
@@ -10,7 +10,10 @@ import { connection } from 'next/server';
 import { createAdminClient } from '@/lib/db/admin';
 import { createClient } from '@/lib/db/server';
 import { usePlatform } from '@/lib/platform';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { ProPricingView } from '@/components/pro/pro-pricing-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 import type { PricingPlanRow } from '@/types/db/system-tables';
 
 const FALLBACK_PLANS: PricingPlanRow[] = [
@@ -77,35 +80,30 @@ async function ProPageContent() {
   const platform = await usePlatform();
   const admin = createAdminClient();
 
-  const { data: dbPlans } = await admin
-    .from('pricing_plans')
-    .select('*')
-    .order('duration_days', { ascending: true });
-
-  const plans = (dbPlans && dbPlans.length > 0 ? dbPlans : FALLBACK_PLANS) as unknown as PricingPlanRow[];
-
-  let userCountry = 'BD';
+  let userId: string | null = null;
   try {
     const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
-
-    if (user) {
-      const { data: profile } = await admin
-        .from('users')
-        .select('country')
-        .eq('id', user.id)
-        .single();
-
-      if (profile?.country) {
-        userCountry = profile.country.toUpperCase();
-      }
-    }
+    userId = user?.id ?? null;
   } catch {
     // Guest or unauthenticated access
   }
 
+  const [{ blocked, profile }, { data: dbPlans }] = await Promise.all([
+    getPageAccessState(userId),
+    admin.from('pricing_plans').select('*').order('duration_days', { ascending: true }),
+  ]);
+
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+
+  const plans = (
+    dbPlans && dbPlans.length > 0 ? dbPlans : FALLBACK_PLANS
+  ) as unknown as PricingPlanRow[];
+
+  const userCountry = (profile?.country || 'BD').toUpperCase();
   const defaultCurrency: 'BDT' | 'USD' = userCountry === 'BD' ? 'BDT' : 'USD';
 
   return (
@@ -113,6 +111,8 @@ async function ProPageContent() {
       plans={plans}
       defaultCurrency={defaultCurrency}
       platform={platform}
+      isPro={profile?.isPro ?? false}
+      proUntil={profile?.pro_until ?? null}
     />
   );
 }

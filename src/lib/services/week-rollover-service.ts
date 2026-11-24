@@ -8,7 +8,7 @@ import 'server-only';
 
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
-import { checkAIFirewall } from '@/lib/ai/firewall';
+import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
 import {
   Pipeline3WeeklyPlannerSchema,
   Pipeline7NextGoalBridgeSchema,
@@ -49,12 +49,15 @@ export async function completeGoalWithJourneyCard(params: CompleteGoalParams) {
     .single();
 
   const firewall7 = await checkAIFirewall({ userId, pipeline: 'PIPELINE_7', goalId: goal.id });
+  if (!firewall7.allowed) {
+    throw new AIFirewallError(firewall7.reason || 'FIREWALL_BLOCKED', firewall7.retryAfterSeconds);
+  }
   const p7Output = await executeAIPipeline<Pipeline7Output>(
     {
       pipeline: 'PIPELINE_7',
       userId,
       goalId: goal.id,
-      model: firewall7.allowed ? firewall7.model : 'gemini-3.5-flash-lite',
+      model: firewall7.model,
       language: (user?.language as 'EN' | 'BN') || 'EN',
       country: user?.country || 'BD',
       category: goal.category,
@@ -146,12 +149,15 @@ export async function rolloverToNextWeek(params: RolloverWeekParams) {
     .single();
 
   const firewall3 = await checkAIFirewall({ userId, pipeline: 'PIPELINE_3', goalId: goal.id });
+  if (!firewall3.allowed) {
+    throw new AIFirewallError(firewall3.reason || 'FIREWALL_BLOCKED', firewall3.retryAfterSeconds);
+  }
   const p3Output = await executeAIPipeline<Pipeline3Output>(
     {
       pipeline: 'PIPELINE_3',
       userId,
       goalId: goal.id,
-      model: firewall3.allowed ? firewall3.model : 'gemini-3.5-flash-lite',
+      model: firewall3.model,
       language: (user?.language as 'EN' | 'BN') || 'EN',
       country: user?.country || 'BD',
       category: goal.category,

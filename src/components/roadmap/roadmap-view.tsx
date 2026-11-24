@@ -47,9 +47,10 @@ interface RoadmapViewProps {
   } | null;
   milestones: MilestoneData[];
   allGoals: Array<{ id: string; title: string; status: string }>;
+  isPro?: boolean;
 }
 
-export function RoadmapView({ goal, milestones, allGoals }: Readonly<RoadmapViewProps>) {
+export function RoadmapView({ goal, milestones, allGoals, isPro }: Readonly<RoadmapViewProps>) {
   const [activePlanStyle, setActivePlanStyle] = useState<PlanStyle>(
     goal?.plan_style || 'FLEXIBLE_WEEK'
   );
@@ -230,7 +231,7 @@ export function RoadmapView({ goal, milestones, allGoals }: Readonly<RoadmapView
           pendingCount: 0,
         }))}
         activeGoalId={goal.id}
-        isPro={false}
+        isPro={isPro}
         onSelectGoal={(selectedId) => {
           setIsSwitcherOpen(false);
           window.location.href = `/roadmap?goalId=${selectedId}`;

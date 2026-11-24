@@ -7,9 +7,13 @@ import React, { Suspense } from 'react';
  */
 
 import { redirect, notFound } from 'next/navigation';
+import { connection } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
+import { getPageAccessState } from '@/lib/services/access-guard.service';
 import { WeeklySummaryView } from '@/components/weekly-summary/weekly-summary-view';
+import { MaintenanceScreen } from '@/components/shell/maintenance-screen';
+import { AccountSuspendedScreen } from '@/components/shell/account-suspended-screen';
 
 interface ReviewWithGoal {
   id: string;
@@ -44,6 +48,7 @@ async function WeeklySummaryContent({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await connection();
   const { id } = await params;
   const supabase = await createClient();
   const {
@@ -53,6 +58,11 @@ async function WeeklySummaryContent({
   if (!user) {
     redirect(`/login?next=%2Fweekly-summary%2F${id}`);
   }
+
+  const { blocked } = await getPageAccessState(user.id);
+  if (blocked === 'MAINTENANCE') return <MaintenanceScreen />;
+  if (blocked === 'SUSPENDED') return <AccountSuspendedScreen />;
+  if (blocked === 'DELETED') redirect(`/login?next=%2Fweekly-summary%2F${id}`);
 
   const admin = createAdminClient();
   const { data: rawReview } = await admin

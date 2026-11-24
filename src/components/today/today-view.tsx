@@ -119,7 +119,15 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stuckReason: reason }),
     });
-    if (res.ok) await reloadPlan();
+    if (res.ok) {
+      await reloadPlan();
+      return;
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      err.message ||
+        'Bunon AI is briefly paused. Your Today tasks, proofs, and Timeline continue working normally.'
+    );
   };
 
   const handleAdvanceWeek = async () => {
@@ -138,7 +146,11 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
         else if (result.weeklyReviewId) router.push(`/weekly-summary/${result.weeklyReviewId}`);
         else await reloadPlan();
       } else {
-        setAdvanceWeekError("Bunon's AI is momentarily busy. Your progress is safe — please tap to try again.");
+        const err = await res.json().catch(() => ({}));
+        setAdvanceWeekError(
+          err.message ||
+            "Bunon's AI is momentarily busy. Your progress is safe — please tap to try again."
+        );
       }
     } catch {
       setAdvanceWeekError("Bunon's AI is momentarily busy. Your progress is safe — please tap to try again.");
@@ -240,7 +252,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
       {data.activeGoal && (
         <>
           <DayNoteSheet isOpen={isDayNoteOpen} onClose={() => setIsDayNoteOpen(false)} goalId={data.activeGoal.id} initialText={data.todayDayNote?.text || ''} onSaved={reloadPlan} />
-          <GoalSwitcherSheet isOpen={isGoalSwitcherOpen} onClose={() => setIsGoalSwitcherOpen(false)} goals={data.goals} activeGoalId={data.activeGoal.id} onSelectGoal={(id) => reloadPlan(id)} />
+          <GoalSwitcherSheet isOpen={isGoalSwitcherOpen} onClose={() => setIsGoalSwitcherOpen(false)} goals={data.goals} activeGoalId={data.activeGoal.id} isPro={data.isPro} onSelectGoal={(id) => reloadPlan(id)} />
           <ThisWeekPlanModal isOpen={isWeekPlanOpen} onClose={() => setIsWeekPlanOpen(false)} weekNumber={currentWeek} milestone={data.currentMilestone} tasks={data.threadTasks} />
         </>
       )}

@@ -7,6 +7,8 @@ import { NextResponse } from 'next/server';
  */
 
 import { createClient } from '@/lib/db/server';
+import { AIFirewallError } from '@/lib/ai/firewall';
+import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { advanceWeek } from '@/lib/services/week-service';
 
 export const maxDuration = 60;
@@ -21,6 +23,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const guard = await guardApiRoute(user.id);
+  if (!guard.ok) return guard.response;
+
   try {
     const body = await request.json();
     const goalId = body.goalId;
@@ -32,6 +37,10 @@ export async function POST(request: Request) {
     const result = await advanceWeek(user.id, goalId);
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof AIFirewallError) {
+      const formatted = formatAIFirewallHttpError(err.reason, err.retryAfterSeconds);
+      return NextResponse.json(formatted.body, { status: formatted.status });
+    }
     const message = err instanceof Error ? err.message : 'Failed to advance week';
     return NextResponse.json({ error: message }, { status: 500 });
   }
