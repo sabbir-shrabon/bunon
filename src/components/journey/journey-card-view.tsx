@@ -48,7 +48,7 @@ export function JourneyCardView({ card, isOwner = true }: Readonly<JourneyCardVi
 
   return (
     <AppShell>
-      <div className="flex flex-col w-full max-w-[428px] md:max-w-[640px] mx-auto px-4 pt-4 pb-16">
+      <div className="flex flex-col w-full max-w-[428px] md:max-w-[640px] mx-auto px-4 pt-4 pb-24 md:pb-12">
         {/* Top Header */}
         <div className="h-14 flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">

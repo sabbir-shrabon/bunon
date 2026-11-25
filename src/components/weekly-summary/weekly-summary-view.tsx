@@ -48,7 +48,7 @@ export function WeeklySummaryView({ review }: Readonly<WeeklySummaryViewProps>) 
 
   return (
     <AppShell>
-      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-20">
+      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-40 md:pb-28">
         {/* Top Header */}
         <div className="flex items-center gap-3 mb-4">
           <button
@@ -170,7 +170,7 @@ export function WeeklySummaryView({ review }: Readonly<WeeklySummaryViewProps>) 
         </div>
 
         {/* Bottom CTA */}
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-card border-t border-hairline md:left-[250px] flex justify-center">
+        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-0 left-0 right-0 z-30 p-4 bg-card/95 backdrop-blur-md border-t border-hairline md:left-[250px] md:pb-[max(1rem,env(safe-area-inset-bottom,0px))] flex justify-center">
           <div className="w-full max-w-[640px]">
             <PrimaryButton onClick={() => router.push('/today')}>
               Go to Today

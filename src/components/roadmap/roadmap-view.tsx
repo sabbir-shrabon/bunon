@@ -94,7 +94,7 @@ export function RoadmapView({ goal, milestones, allGoals, isPro }: Readonly<Road
 
   return (
     <AppShell>
-      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-12">
+      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-24 md:pb-12">
         {/* Header Row: Whisper-quiet goal selector and target meta */}
         <div className="flex justify-between items-center mb-3 text-[13px] leading-tight text-muted">
           <button

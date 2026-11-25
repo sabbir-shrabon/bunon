@@ -76,7 +76,7 @@ function ReplanContent() {
 
   return (
     <AppShell>
-      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-20">
+      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-40 md:pb-28">
         {/* Top Header */}
         <div className="flex items-center gap-3 mb-4">
           <button
@@ -154,18 +154,20 @@ function ReplanContent() {
             </div>
 
             {/* Fixed Action Footer */}
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-card border-t border-hairline md:left-[250px] flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="h-[52px] flex-1 rounded-full border border-hairline text-[14px] font-medium text-ink hover:bg-secondary-surface transition-colors cursor-pointer"
-              >
-                Keep my current plan
-              </button>
-              <div className="flex-1">
-                <PrimaryButton onClick={handleAccept} disabled={submitting}>
-                  {submitting ? 'Applying...' : 'Accept the new plan'}
-                </PrimaryButton>
+            <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-0 left-0 right-0 z-30 bg-card/95 backdrop-blur-md border-t border-hairline md:left-[250px] md:pb-[env(safe-area-inset-bottom,0px)]">
+              <div className="mx-auto max-w-[640px] p-4 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.back()}
+                  className="h-[52px] flex-1 rounded-full border border-hairline text-[14px] font-medium text-ink hover:bg-secondary-surface transition-colors cursor-pointer"
+                >
+                  Keep my current plan
+                </button>
+                <div className="flex-1">
+                  <PrimaryButton onClick={handleAccept} disabled={submitting}>
+                    {submitting ? 'Applying...' : 'Accept the new plan'}
+                  </PrimaryButton>
+                </div>
               </div>
             </div>
           </div>

@@ -31,12 +31,7 @@ interface TimelineViewProps {
   isPro?: boolean;
 }
 
-export function TimelineView({
-  initialPosts,
-  goals,
-  calendar,
-  isPro,
-}: Readonly<TimelineViewProps>) {
+export function TimelineView({ initialPosts, goals, calendar, isPro }: Readonly<TimelineViewProps>) {
   const [posts, setPosts] = useState<TimelinePost[]>(initialPosts);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -148,7 +143,7 @@ export function TimelineView({
         />
 
         {/* Continuous Threads-Style Feed Container */}
-        <section className="relative w-full flex-1 bg-card pb-16">
+        <section className="relative w-full flex-1 bg-card pb-24 md:pb-16">
           {posts.length === 0 ? (
             /* Screen 62: Timeline Empty State */
             <div className="flex flex-col items-center justify-center py-20 px-6 text-center">

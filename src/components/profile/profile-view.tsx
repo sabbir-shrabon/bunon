@@ -51,7 +51,7 @@ export function ProfileView({
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-[640px] px-4 py-6 md:py-8 space-y-6">
+      <div className="mx-auto w-full max-w-[640px] px-4 pt-6 pb-24 md:py-8 md:pb-10 space-y-6">
         {/* Header with Back Arrow */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">

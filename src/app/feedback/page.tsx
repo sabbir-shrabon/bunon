@@ -61,7 +61,7 @@ export default function FeedbackPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-[640px] px-4 py-6 md:py-8">
+      <div className="mx-auto w-full max-w-[640px] px-4 pt-6 pb-24 md:py-8 md:pb-10">
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <button

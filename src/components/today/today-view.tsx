@@ -20,6 +20,7 @@ import { DayNoteSheet } from '@/components/today/day-note-sheet';
 import { GoalSwitcherSheet } from '@/components/today/goal-switcher-sheet';
 import { ThisWeekPlanModal } from '@/components/today/this-week-plan-modal';
 import { UndoCompleteSheet } from '@/components/today/undo-complete-sheet';
+import { useDailyBannerDismissal } from '@/components/today/use-banner-dismissal';
 import { runTwoStepWeekAdvance, requestTaskScheduleAdjust } from '@/components/today/week-advance-api';
 import type { TodayPlanResponse } from '@/lib/services/today-service';
 import type { ThreadTaskItem } from '@/components/today/types';
@@ -38,6 +39,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
   const [isDayNoteOpen, setIsDayNoteOpen] = useState(false);
   const [isGoalSwitcherOpen, setIsGoalSwitcherOpen] = useState(false);
   const [isWeekPlanOpen, setIsWeekPlanOpen] = useState(false);
+  const [isBannerDismissed, handleDismissBanner] = useDailyBannerDismissal(data.activeGoal?.id);
   const [isAdvancingWeek, setIsAdvancingWeek] = useState(false);
   const [advanceStepLabel, setAdvanceStepLabel] = useState<string | null>(null);
   const [advanceWeekError, setAdvanceWeekError] = useState<string | null>(null);
@@ -127,20 +129,11 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
     const activeWeek = data.activeGoal.current_week_number;
     try {
       const result = await runTwoStepWeekAdvance(data.activeGoal.id, activeWeek, setAdvanceStepLabel);
-      if (result.isGoalCompleted && result.journeyCardSlug) {
-        router.push(`/journey/${result.journeyCardSlug}`);
-      } else if (result.weeklyReviewId) {
-        router.push(`/weekly-summary/${result.weeklyReviewId}`);
-      } else {
-        await reloadPlan();
-        router.refresh();
-      }
+      if (result.isGoalCompleted && result.journeyCardSlug) router.push(`/journey/${result.journeyCardSlug}`);
+      else if (result.weeklyReviewId) router.push(`/weekly-summary/${result.weeklyReviewId}`);
+      else { await reloadPlan(); router.refresh(); }
     } catch (err) {
-      setAdvanceWeekError(
-        err instanceof Error
-          ? err.message
-          : "We could not build next week's plan just now. Your progress is safe — please tap to try again."
-      );
+      setAdvanceWeekError(err instanceof Error ? err.message : "We could not build next week's plan just now. Your progress is safe — please tap to try again.");
     } finally {
       setIsAdvancingWeek(false);
       setAdvanceStepLabel(null);
@@ -156,13 +149,14 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
   const currentDayInWeek = Math.max(1, new Date().getDay() + 1);
   const isAnyModalOpen = isWhyOpen || isStuckOpen || isDayNoteOpen || isGoalSwitcherOpen || isWeekPlanOpen || Boolean(undoTask);
   const focusedTask = data.threadTasks[focusedIndex] || data.heroTask;
+  const showBanner = Boolean(data.banner?.type) && !isBannerDismissed;
 
   return (
     <AppShell>
-      <main className="flex-1 flex flex-col relative w-full pt-16 pb-24 bg-[var(--page)]">
-        <div className="flex flex-col w-full max-w-[428px] md:max-w-[640px] mx-auto px-4 pt-3 pb-8">
+      <div className="flex-1 flex flex-col relative w-full pt-0 pb-6 md:pb-10 bg-[var(--page)]">
+        <div className="flex flex-col w-full max-w-[428px] md:max-w-[640px] mx-auto px-4 pt-3 md:pt-4 pb-4">
           {/* Header Row */}
-          <div className="flex justify-between items-center mb-3 px-1 text-muted text-[13px] font-medium">
+          <div className="flex justify-between items-center mb-2 md:mb-3 px-1 text-muted text-[13px] font-medium">
             <button type="button" onClick={() => setIsGoalSwitcherOpen(true)} className="flex items-center gap-1 text-ink hover:text-muted transition-colors cursor-pointer">
               <span>{data.activeGoal.title}</span>
               <span className="text-[14px]">▾</span>
@@ -172,7 +166,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
 
           {/* Toast */}
           {completedToast && (
-            <div role="status" className="mb-3 px-4 py-2.5 rounded-2xl bg-[#FFB020]/15 border border-[#FFB020]/30 text-ink flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2 duration-300">
+            <div role="status" className="mb-2.5 px-4 py-2.5 rounded-2xl bg-[#FFB020]/15 border border-[#FFB020]/30 text-ink flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-5 h-5 rounded-full bg-[#FFB020] text-white flex items-center justify-center text-[11px] font-bold shrink-0">✓</div>
                 <span className="text-[13px] font-semibold truncate">{completedToast}</span>
@@ -182,11 +176,13 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
           )}
 
           {/* Contextual Banner Slot */}
-          <ContextCardSlot banner={data.banner} onOpenWeekPlan={() => setIsWeekPlanOpen(true)} onSelectMissCause={handleAdjustSchedule} />
+          {showBanner && (
+            <ContextCardSlot banner={data.banner} onOpenWeekPlan={() => setIsWeekPlanOpen(true)} onSelectMissCause={handleAdjustSchedule} onDismiss={handleDismissBanner} />
+          )}
 
           {/* 3-Slot Fluid Morph Deck */}
           {data.threadTasks.length > 0 ? (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2.5 md:gap-3">
               <MorphDeck
                 threadTasks={data.threadTasks}
                 focusedIndex={focusedIndex}
@@ -197,6 +193,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
                 adaptiveSlice={data.adaptiveSlice}
                 planStyle={data.activeGoal.plan_style}
                 isAnyModalOpen={isAnyModalOpen}
+                hasVisibleBanner={showBanner}
                 onOpenWhyThisTask={() => setIsWhyOpen(true)}
                 onOpenStuckSheet={() => setIsStuckOpen(true)}
                 onToggleSubstep={handleToggleSubstep}
@@ -214,7 +211,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
               )}
 
               {!data.isWeekDone && (
-                <div className="pt-3 flex justify-center">
+                <div className="pt-2 flex justify-center">
                   <button type="button" onClick={() => setIsDayNoteOpen(true)} className="text-muted hover:text-ink transition-colors font-medium text-[13px] cursor-pointer py-1">
                     + Add a day note
                   </button>
@@ -225,7 +222,7 @@ export function TodayView({ initialData }: Readonly<{ initialData: TodayPlanResp
             <AllDoneView isWeekQueueDone={data.isWeekDone} weekNumber={currentWeek} onOpenDayNote={() => setIsDayNoteOpen(true)} onAdvanceWeek={handleAdvanceWeek} isAdvancingWeek={isAdvancingWeek} advanceStepLabel={advanceStepLabel} advanceWeekError={advanceWeekError} />
           )}
         </div>
-      </main>
+      </div>
 
       {/* Sheets & Modals */}
       {focusedTask && data.activeGoal && (

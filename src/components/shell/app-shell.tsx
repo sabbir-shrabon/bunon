@@ -50,7 +50,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
       />
       <DesktopSidebar user={user} isPro={isPro} proUntil={proUntil} />
       <DesktopTopActions user={user} />
-      <main className="min-h-screen pb-20 pt-14 md:ml-[250px] md:pb-0 md:pt-14">
+      <main className="min-h-screen pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] pt-[calc(3.5rem+env(safe-area-inset-top,0px))] md:ml-[250px] md:pb-0 md:pt-14">
         {children}
       </main>
       <BottomNav />

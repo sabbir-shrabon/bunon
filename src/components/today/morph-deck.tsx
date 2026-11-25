@@ -24,6 +24,7 @@ interface MorphDeckProps {
   adaptiveSlice: StepSlicerResult | null;
   planStyle: string;
   isAnyModalOpen: boolean;
+  hasVisibleBanner?: boolean;
   onOpenWhyThisTask: () => void;
   onOpenStuckSheet: () => void;
   onToggleSubstep: (stepNumber: number, done: boolean) => Promise<void>;
@@ -44,6 +45,7 @@ export function MorphDeck({
   adaptiveSlice,
   planStyle,
   isAnyModalOpen,
+  hasVisibleBanner = false,
   onOpenWhyThisTask,
   onOpenStuckSheet,
   onToggleSubstep,
@@ -141,11 +143,15 @@ export function MorphDeck({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onWheel={handleWheel}
-      className="flex flex-col gap-3 relative select-none w-full"
+      className="flex flex-col gap-2.5 md:gap-3 relative select-none w-full"
     >
       {/* Slot 1: Previous Compressed Task */}
       {prevIndex >= 0 && (
-        <div className="transition-all duration-[440ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
+        <div
+          className={`transition-all duration-[440ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            hasVisibleBanner && focusedIndex === activeTaskIndex ? 'hidden md:block' : ''
+          }`}
+        >
           <CompressedTaskSlot
             task={threadTasks[prevIndex]}
             isActiveHero={prevIndex === activeTaskIndex}
@@ -195,7 +201,7 @@ export function MorphDeck({
 
       {/* Floating 'Back to today' Pill */}
       {focusedIndex !== activeTaskIndex && (
-        <div className="fixed bottom-20 md:bottom-8 left-1/2 -translate-x-1/2 z-40 animate-in fade-in zoom-in-95 duration-200 pointer-events-auto">
+        <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:bottom-8 left-1/2 md:left-[calc(50%+125px)] -translate-x-1/2 z-30 animate-in fade-in zoom-in-95 duration-200 pointer-events-auto">
           <button
             type="button"
             onClick={() => setFocusedIndex(activeTaskIndex)}

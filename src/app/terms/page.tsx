@@ -17,7 +17,7 @@ export default function TermsOfUsePage() {
 
   return (
     <AppShell>
-      <article className="mx-auto w-full max-w-[640px] px-4 py-6 md:py-8">
+      <article className="mx-auto w-full max-w-[640px] px-4 pt-6 pb-24 md:py-8 md:pb-10">
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <button

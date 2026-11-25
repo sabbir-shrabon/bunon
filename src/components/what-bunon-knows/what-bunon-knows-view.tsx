@@ -56,7 +56,7 @@ export function WhatBunonKnowsView({
 
   return (
     <AppShell>
-      <div className="mx-auto flex w-full max-w-[428px] flex-col pb-24 md:max-w-[640px]">
+      <div className="mx-auto flex w-full max-w-[428px] flex-col pb-40 md:max-w-[640px] md:pb-28">
         {/* Header */}
         <header className="flex h-14 items-center justify-between px-4 border-b border-hairline">
           <button
@@ -197,7 +197,7 @@ export function WhatBunonKnowsView({
         </div>
 
         {/* Fixed Bottom Action Bar */}
-        <div className="fixed bottom-0 left-0 right-0 z-30 md:left-[250px] md:right-0 border-t border-hairline bg-card/95 backdrop-blur-md pb-safe">
+        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-30 md:bottom-0 md:left-[250px] md:right-0 border-t border-hairline bg-card/95 backdrop-blur-md md:pb-[env(safe-area-inset-bottom,0px)]">
           <div className="mx-auto max-w-[428px] p-4 md:max-w-[640px]">
             <PrimaryButton
               type="button"
@@ -224,7 +224,7 @@ export function WhatBunonKnowsView({
 
         {/* Lightweight notification toast */}
         {toastMessage && (
-          <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-[12px] font-medium text-page shadow-lg animate-fade-in">
+          <div className="fixed bottom-[calc(9.5rem+env(safe-area-inset-bottom,0px))] md:bottom-24 left-1/2 md:left-[calc(50%+125px)] z-50 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-[12px] font-medium text-page animate-fade-in">
             {toastMessage}
           </div>
         )}

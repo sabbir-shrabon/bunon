@@ -34,13 +34,7 @@ const PRO_BENEFITS = [
   'Free shareable Journey Cards on goal completion',
 ];
 
-export function ProPricingView({
-  plans,
-  defaultCurrency,
-  platform,
-  isPro = false,
-  proUntil = null,
-}: ProPricingViewProps) {
+export function ProPricingView({ plans, defaultCurrency, platform, isPro = false, proUntil = null }: ProPricingViewProps) {
   const router = useRouter();
   const { language } = useAppPreferences();
   const [selectedPlan, setSelectedPlan] = useState<string>(
@@ -54,7 +48,7 @@ export function ProPricingView({
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-[640px] px-4 py-6 md:py-8 space-y-6">
+      <div className="mx-auto w-full max-w-[640px] px-4 pt-6 pb-24 md:py-8 md:pb-10 space-y-6">
         {/* Header with Title and Currency Toggle */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -67,20 +61,18 @@ export function ProPricingView({
               <ArrowLeft size={20} />
             </button>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-semibold tracking-tight text-ink">
-                  Bunon Pro
-                </h1>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                    activePro
-                      ? 'bg-[#FFB020]/15 text-ink border border-[#FFB020]/40'
-                      : 'bg-secondary-surface text-muted'
-                  }`}
-                >
-                  {activePro ? 'Pro' : 'Free plan'}
-                </span>
-              </div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-semibold tracking-tight text-ink">Bunon Pro</h1>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                      activePro
+                        ? 'bg-[#FFB020]/15 text-ink border border-[#FFB020]/40'
+                        : 'bg-secondary-surface text-muted'
+                    }`}
+                  >
+                    {activePro ? 'Pro' : 'Free plan'}
+                  </span>
+                </div>
               <p className="text-xs text-muted">
                 {activePro && formattedExpiry
                   ? `Active Pro pass · Valid until ${formattedExpiry}`

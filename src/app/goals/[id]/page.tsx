@@ -78,7 +78,7 @@ function SingleGoalContent({
 
   return (
     <AppShell>
-      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-20">
+      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-24 md:pb-12">
         <div className="flex items-center gap-3 mb-5">
           <button
             type="button"

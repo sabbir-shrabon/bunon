@@ -36,7 +36,7 @@ async function GoalsContent() {
 
   return (
     <AppShell>
-      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-16">
+      <div className="flex flex-col w-full max-w-[640px] mx-auto px-5 pt-4 pb-24 md:pb-12">
         <h1 className="text-[22px] font-bold text-ink mb-2">Goals &amp; Journey Cards</h1>
         <p className="text-[13.5px] text-muted mb-6">
           Every goal chapter you have started, proven, and accomplished.
