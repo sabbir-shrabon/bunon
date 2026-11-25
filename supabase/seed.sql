@@ -557,31 +557,34 @@ INSERT INTO public.prompt_versions (
   'PIPELINE_3_WEEKLY_PLANNER',
   'PIPELINE',
   1,
-  'Generate Goal Week {{week_number}} of {{total_weeks}} (starting {{week_start_date}}, today {{current_date}}) for ''{{goal_title}}'' in mode ''{{execution_mode}}'' and style ''{{plan_style}}''.
+  'Generate Goal Week {{week_number}} of {{total_weeks}} (starting {{week_start_date}}).
 
 INPUT CONTEXT:
-• Goal: {{goal_title}} | Why: {{goal_why}} | Mode: {{execution_mode}} | Style: {{plan_style}}
-• Capacity: {{hours_per_day}}h/day across {{working_days_dates_json}} | Weekday map: {{day_time_map_json}}
+• Today''s Date: {{current_date}} | Target Language: {{language}}
+• Goal: {{goal_title}} | Why: {{goal_why}} | Execution Mode: {{execution_mode}} | Plan Style: {{plan_style}}
+• Capacity: {{hours_per_day}}h/day across Working Days {{working_days_dates_json}} | Weekday Time Map: {{day_time_map_json}}
 • User State: {{user_state}} | Behavior Signals: {{behavior_signals_json}} | Custom Week Focus: {{user_custom_week_focus}}
 • Win Strategy Directive (MUST FOLLOW): {{win_strategy_directive}}
 • Ranked Context Pack (''ctx_XX'' IDs): {{context_pack_json}}
 • Active Milestone: {{active_milestone_json}} | Next Milestone: {{upcoming_milestone_json}}
-• Recent Summaries & Notes: {{last_two_weekly_summaries_json}} | {{recent_day_notes_json}}
-• Carried Tasks: {{carried_tasks_json}} | Flagged Not Useful: {{flagged_not_useful_tasks_json}}
+• Recent Weekly Summaries: {{last_two_weekly_summaries_json}}
+• Recent Day Notes: {{recent_day_notes_json}}
+• Carried Tasks: {{carried_tasks_json}}
+• Flagged Not Useful Tasks: {{flagged_not_useful_tasks_json}}
 
 DAY-BY-DAY INTELLIGENCE & CAPACITY RULES:
-1. Signal-Driven Sizing: Inspect {{recent_day_notes_json}}, {{flagged_not_useful_tasks_json}}, and {{behavior_signals_json}} before sizing tasks:
-   • Never repeat any task style flagged in {{flagged_not_useful_tasks_json}}.
+1. Signal-Driven Sizing: Inspect Recent Day Notes, Flagged Not Useful Tasks, and Behavior Signals before sizing tasks:
+   • Never repeat any task style flagged in Flagged Not Useful Tasks.
    • If effort ratings trend ''hard'' or ''used_10m_rate'' is high, shrink deliverables to 45–75m with an ultra-small 15–20m Step 1.
-   • If effort trends ''easy'' or user state is ''AHEAD'', raise challenge and skip basic prep.
+   • If effort trends ''easy'' or User State is ''AHEAD'', raise challenge and skip basic prep.
 2. Capacity Cap: Keep total weekly planned minutes <= 85% of available capacity (<= 75% in Week 1).
-3. Mode Rules (''{{execution_mode}}''):
+3. Mode Rules (matching Execution Mode above):
    • ''deliverable_queue'': Output 2 to 4 sequential ''DELIVERABLE'' items (''sequence_order'': 1..N, ''target_count'': 1; plus at most 1 optional ''DAILY_CORE'' or ''WEEKLY_QUOTA'' habit card only if daily repetition is essential). Break each deliverable into 3 to 6 checkable sub-steps (''how_to_steps.steps'': ''{ step_number, text, minutes }'', 15–45m each, summing to ''estimate_minutes'') with a 15–20m Step 1.
    • ''daily_quota'': Output 4 to 5 items across the 3 tiers: (a) 1 ''SETUP_DELIVERABLE'' (''target_count'': 1), (b) 1–2 ''DAILY_CORE'' items (''target_count'': 7, ''min_version_10m'' = fast zero-prep swap preserving 100% biological dose), (c) 1–2 ''WEEKLY_QUOTA'' items (''target_count'': 2..6), and (d) 1 ''REALITY_CHECK'' (''target_count'': 1).
 4. Context, Attribution & Memory:
-   • ''today_context_line'': Write 1 natural, specific line in {{language}} (<= 95 chars) referencing a real schedule/rhythm fact from {{context_pack_json}} or {{recent_day_notes_json}} (or '''' if none).
-   • ''used_context_ids'': On every task, include only the exact ''ctx_XX'' IDs that directly shaped that task.
-   • ''proposed_memory_ops'': Emit ''UPSERT'' only for durable, verified facts learned from {{recent_day_notes_json}} or {{user_custom_week_focus}} (set ''valid_until'' to ''YYYY-MM-DD'' relative to {{current_date}} for temporary events like exams/travel, or null for lasting constraints; never overwrite ''locked_by_user: true'' items).',
+   • ''today_context_line'': Write 1 natural, specific line in the target language (<= 95 chars) referencing a real schedule or rhythm fact from Ranked Context Pack or Recent Day Notes (or '''' if none).
+   • ''used_context_ids'': On every task, include only the exact ''ctx_XX'' IDs from Ranked Context Pack that directly shaped that task.
+   • ''proposed_memory_ops'': Emit ''UPSERT'' only for durable, verified facts learned from Recent Day Notes or Custom Week Focus (set ''valid_until'' to ''YYYY-MM-DD'' relative to Today''s Date for temporary events like exams/travel, or null for lasting constraints; never overwrite ''locked_by_user: true'' items).',
   '{"is_milestone_final_week":"Boolean (true if finishing this week''s items completes active milestone)","today_context_line":"1 short, human line in {{language}} (max 95 chars)","tasks":"Array of 2 to 5 weekly items with sub-steps and 10-minute floor","proposed_memory_ops":"Optional array of memory updates"}'::jsonb,
   '{"type":"object","required":["is_milestone_final_week","today_context_line","tasks"],"properties":{"is_milestone_final_week":{"type":"boolean"},"today_context_line":{"type":"string"},"tasks":{"type":"array","items":{"type":"object","required":["task_type","adaptation_policy","sequence_order","target_count","milestone_position","title","estimate_minutes","done_means","how_to_steps","min_version_10m","why_it_matters"],"properties":{"task_type":{"type":"string","enum":["DELIVERABLE","SETUP_DELIVERABLE","DAILY_CORE","WEEKLY_QUOTA","REALITY_CHECK"]},"adaptation_policy":{"type":"string","enum":["SLICE_STEPS","PRESERVE_DOSE_SWAP","MOVE_DAY","MEASUREMENT_ONLY"]},"sequence_order":{"type":"integer"},"target_count":{"type":"integer"},"milestone_position":{"type":"integer"},"title":{"type":"string"},"estimate_minutes":{"type":"integer"},"is_stretch_task":{"type":"boolean"},"done_means":{"type":"string"},"how_to_steps":{"type":"object","required":["steps","example"],"properties":{"steps":{"type":"array","items":{"type":"object","required":["step_number","text","minutes"],"properties":{"step_number":{"type":"integer"},"text":{"type":"string"},"minutes":{"type":"integer"}}}},"example":{"type":"string"}}},"min_version_10m":{"type":"string"},"why_it_matters":{"type":"string"},"used_context_ids":{"type":"array","items":{"type":"string"}}}}},"proposed_memory_ops":{"type":"array","items":{"type":"object","required":["op","scope","bucket","fact","source","confidence"],"properties":{"op":{"type":"string","enum":["UPSERT","RESOLVE","EXPIRE"]},"scope":{"type":"string","enum":["PERSON","DOMAIN","GOAL"]},"bucket":{"type":"string"},"fact":{"type":"string"},"source":{"type":"string"},"confidence":{"type":"number"},"valid_until":{"type":["string","null"]}}}}}}'::jsonb,
   ARRAY['language', 'goal_title', 'goal_why', 'execution_mode', 'plan_style', 'week_number', 'total_weeks', 'week_start_date', 'hours_per_day', 'working_days_dates_json', 'day_time_map_json', 'context_pack_json', 'user_state', 'win_strategy_directive', 'behavior_signals_json', 'active_milestone_json', 'upcoming_milestone_json', 'last_two_weekly_summaries_json', 'recent_day_notes_json', 'carried_tasks_json', 'flagged_not_useful_tasks_json', 'user_custom_week_focus'],
@@ -602,25 +605,27 @@ INSERT INTO public.prompt_versions (
   'PIPELINE_4_DAILY_ADJUSTER',
   'PIPELINE',
   1,
-  'Adapt today''s open work for ''{{goal_title}}'' after a Day Note, Stuck tap, or Welcome-Back check-in.
+  'Adapt today''s open work after a Day Note, Stuck tap, or Welcome-Back check-in.
 
 INPUT CONTEXT:
-• Today: {{current_date}} | Goal: {{goal_title}} (Mode: {{execution_mode}} | Style: {{plan_style}} | Budget: {{hours_per_day}}h/day | State: {{user_state}})
+• Today''s Date: {{current_date}} | Goal: {{goal_title}} | Execution Mode: {{execution_mode}} | Plan Style: {{plan_style}} | Budget: {{hours_per_day}}h/day | User State: {{user_state}}
 • Trigger: {{trigger_type}} | Stuck Reason: {{stuck_reason}} | Miss Cause: {{miss_cause}}
 • Day Note: <user_input>{{day_note_text}}</user_input>
 • Target Task: {{target_task_json}}
 • Open Tasks This Week: {{remaining_week_open_tasks_json}}
 • Weekday Time Map: {{day_time_map_json}}
-• Win Directive: {{win_strategy_directive}} | Behavior Signals: {{behavior_signals_json}} | Context Pack: {{context_pack_json}}
+• Win Strategy Directive: {{win_strategy_directive}}
+• Behavior Signals: {{behavior_signals_json}}
+• Ranked Context Pack (''ctx_XX'' IDs): {{context_pack_json}}
 
 SAFETY & PATH-VS-DOSE RULES:
 1. Safety & Distress Check First (''safety_status''): Set ''DISTURBING_HELP'' for self-harm, severe crisis, or medical emergency with a compassionate ''safety_message''; set ''REFUSE_UNSAFE'' for illegal/harmful requests; otherwise ''SAFE''.
 2. Apply Exact Path-vs-Dose Action (''adaptation_action'': ''SLICE'' | ''SWAP'' | ''MOVE'' | ''REWRITE'' | ''NONE''):
    • ''SLICE'' (''TOO_TIRED'' / ''NO_TIME'' / ''LIFE_BUSY'' on ''DELIVERABLE''): Keep the deliverable in the queue and keep 3–6 sequential steps in ''how_to_steps.steps'', rewriting Step 1 to ONE ultra-concrete 15–20m micro-action the user can finish right now.
    • ''SWAP'' (''TOO_TIRED'' / ''NO_TIME'' / ''LIFE_BUSY'' on ''DAILY_CORE''): Swap to a fast zero-prep alternative keeping 100% of the biological dose and ''target_count''.
-   • ''MOVE'' (''TOO_TIRED'' / ''NO_TIME'' / ''LIFE_BUSY'' on ''WEEKLY_QUOTA''): Shift the session to the next open weekday in {{day_time_map_json}}.
+   • ''MOVE'' (''TOO_TIRED'' / ''NO_TIME'' / ''LIFE_BUSY'' on ''WEEKLY_QUOTA''): Shift the session to the next open weekday in Weekday Time Map.
    • ''REWRITE'' (''DID_NOT_UNDERSTAND'' / ''CONFUSED'' / ''NOT_USEFUL'' / ''SYSTEM_TASKS''): Own it warmly in ''coach_note'' (<= 140 chars) and replace the task and its 3–6 ''how_to_steps.steps'' with a clearer, example-first, scaffolded deliverable.
-3. Memory Ops (''proposed_memory_ops''): Extract any durable schedule, skill-gap, or learning-style fact from {{day_note_text}} or {{stuck_reason}} with ''source'': ''day_note'', setting ''valid_until'' (''YYYY-MM-DD'' relative to {{current_date}}) for temporary events or null for lasting constraints; never touch ''locked_by_user: true'' items.',
+3. Memory Ops (''proposed_memory_ops''): Extract any durable schedule, skill-gap, or learning-style fact from Day Note or Stuck Reason with ''source'': ''day_note'', setting ''valid_until'' (''YYYY-MM-DD'' relative to Today''s Date) for temporary events or null for lasting constraints; never touch ''locked_by_user: true'' items.',
   '{"safety_status":"Safety enum","safety_message":"Help message if crisis","adjustment_needed":"Boolean","adaptation_action":"SLICE | SWAP | MOVE | REWRITE | NONE","coach_note":"Short warm sentence","adaptation_reason":"Reason shown on Undo chip","updated_tasks":"Array of modified tasks"}'::jsonb,
   '{"type":"object","required":["safety_status","safety_message","adjustment_needed","adaptation_action","coach_note","adaptation_reason","today_context_line","updated_tasks"],"properties":{"safety_status":{"type":"string","enum":["SAFE","REFUSE_UNSAFE","DISTURBING_HELP"]},"safety_message":{"type":"string"},"adjustment_needed":{"type":"boolean"},"adaptation_action":{"type":"string","enum":["SLICE","SWAP","MOVE","REWRITE","NONE"]},"coach_note":{"type":"string"},"adaptation_reason":{"type":"string"},"today_context_line":{"type":"string"},"updated_tasks":{"type":"array","items":{"type":"object","required":["task_id","title","target_count","estimate_minutes","done_means","how_to_steps","min_version_10m","why_it_matters"],"properties":{"task_id":{"type":"string"},"title":{"type":"string"},"target_count":{"type":"integer"},"estimate_minutes":{"type":"integer"},"done_means":{"type":"string"},"how_to_steps":{"type":"object","required":["steps","example"],"properties":{"steps":{"type":"array","items":{"type":"object","required":["step_number","text","minutes"],"properties":{"step_number":{"type":"integer"},"text":{"type":"string"},"minutes":{"type":"integer"}}}},"example":{"type":"string"}}},"min_version_10m":{"type":"string"},"why_it_matters":{"type":"string"},"used_context_ids":{"type":"array","items":{"type":"string"}}}}},"proposed_memory_ops":{"type":"array","items":{"type":"object","required":["op","scope","bucket","fact","source","confidence"],"properties":{"op":{"type":"string","enum":["UPSERT","RESOLVE","EXPIRE"]},"scope":{"type":"string","enum":["PERSON","DOMAIN","GOAL"]},"bucket":{"type":"string"},"fact":{"type":"string"},"source":{"type":"string"},"confidence":{"type":"number"},"valid_until":{"type":["string","null"]}}}}}}'::jsonb,
   ARRAY['language', 'goal_title', 'execution_mode', 'plan_style', 'hours_per_day', 'trigger_type', 'stuck_reason', 'miss_cause', 'user_state', 'win_strategy_directive', 'behavior_signals_json', 'day_note_text', 'target_task_json', 'remaining_week_open_tasks_json', 'day_time_map_json', 'context_pack_json'],
@@ -641,23 +646,28 @@ INSERT INTO public.prompt_versions (
   'PIPELINE_5_WEEKLY_REVIEW',
   'PIPELINE',
   1,
-  'Review completed Goal Week {{week_number}} of {{total_weeks}} for ''{{goal_title}}'' (today {{current_date}}).
+  'Review completed Goal Week {{week_number}} of {{total_weeks}}.
 
-WEEKLY DATA & SIGNALS:
-• Day-1 Baseline: {{current_baseline}} | Mode: {{execution_mode}} | Style: {{plan_style}} | User State: {{user_state}}
-• Win Directive: {{win_strategy_directive}} | Behavior Signals: {{behavior_signals_json}}
+INPUT CONTEXT:
+• Today''s Date: {{current_date}} | Target Language: {{language}} | Goal: {{goal_title}}
+• Day-1 Baseline: {{current_baseline}} | Execution Mode: {{execution_mode}} | Plan Style: {{plan_style}} | User State: {{user_state}}
+• Win Strategy Directive: {{win_strategy_directive}}
+• Behavior Signals: {{behavior_signals_json}}
 • Completed Tasks & Proof Captions: {{completed_tasks_json}}
 • Reality Check Measurements: {{reality_check_measurements_json}}
-• Carried/Skipped Tasks: {{carried_or_skipped_tasks_json}} | Effort Ratings: {{effort_ratings_summary_json}}
+• Carried or Skipped Tasks: {{carried_or_skipped_tasks_json}}
+• Effort Ratings Summary: {{effort_ratings_summary_json}}
 • Day Notes: {{day_notes_json}}
-• Milestones: {{all_milestones_json}} | Context Pack: {{context_pack_json}} | Weekday Map: {{day_time_map_json}}
+• All Milestones: {{all_milestones_json}}
+• Ranked Context Pack (''ctx_XX'' IDs): {{context_pack_json}}
+• Weekday Time Map: {{day_time_map_json}}
 
 WEEKLY REVIEW RULES:
-1. Outcome Synthesis (''ai_summary'' & ''then_vs_now_line''): Write ''ai_summary'' in {{language}} strictly under 150 words synthesizing real outcomes built (never raw task counts), treating missed/carried work without guilt. In ''then_vs_now_line'' (<= 200 chars), contrast {{current_baseline}} against concrete artifacts or checkpoints shipped so far. Also output 3 crisp ''three_bullet_lines''.
-2. Actionable Next-Week Handoff (''plan_changes''): Use {{effort_ratings_summary_json}} and {{day_notes_json}} to write specific sizing and pacing instructions for Pipeline 3 next week (e.g., "User rated 3/4 tasks hard and has Monday labs — keep Week 3 deliverables under 60m and front-load Step 1").
-3. Evolving Memory (''proposed_memory_ops'' & ''memory_confirmation_question''): Distill durable constraints, skill gaps, and mastered foundations from {{day_notes_json}} and {{completed_tasks_json}} (set ''valid_until'' to ''YYYY-MM-DD'' relative to {{current_date}} for temporary events or null for lasting facts; never overwrite ''locked_by_user: true''). Output at most 1 non-sensitive ''memory_confirmation_question'' when helpful.
-4. Dual-Vibe Photocard Lines (<= 115 chars each in {{language}}, zero private note leaks): Output ''partner_share_line'' (Clean & Minimal summary of what was shipped) and ''photocard_witty_line'' (Playful / Witty line grounded in their real week).
-5. Dose Consent (''suggest_dose_adjustment'', ''daily_quota'' only): If {{reality_check_measurements_json}} shows target recalibration is needed, set true and propose it in ''dose_adjustment_prompt''.',
+1. Outcome Synthesis (''ai_summary'' & ''then_vs_now_line''): Write ''ai_summary'' in the target language strictly under 150 words synthesizing real outcomes built (never raw task counts), treating missed or carried work without guilt. In ''then_vs_now_line'' (<= 200 chars), contrast Day-1 Baseline against concrete artifacts or checkpoints shipped so far. Also output 3 crisp ''three_bullet_lines''.
+2. Actionable Next-Week Handoff (''plan_changes''): Use Effort Ratings Summary and Day Notes to write specific sizing and pacing instructions for Pipeline 3 next week (e.g., "User rated 3/4 tasks hard and has Monday labs — keep Week 3 deliverables under 60m and front-load Step 1").
+3. Evolving Memory (''proposed_memory_ops'' & ''memory_confirmation_question''): Distill durable constraints, skill gaps, and mastered foundations from Day Notes and Completed Tasks & Proof Captions (set ''valid_until'' to ''YYYY-MM-DD'' relative to Today''s Date for temporary events or null for lasting facts; never overwrite ''locked_by_user: true''). Output at most 1 non-sensitive ''memory_confirmation_question'' when helpful.
+4. Dual-Vibe Photocard Lines (<= 115 chars each in the target language, zero private note leaks): Output ''partner_share_line'' (Clean & Minimal summary of what was shipped) and ''photocard_witty_line'' (Playful / Witty line grounded in their real week).
+5. Dose Consent (''suggest_dose_adjustment'', ''daily_quota'' only): If Reality Check Measurements show target recalibration is needed, set true and propose it in ''dose_adjustment_prompt''.',
   '{"ai_summary":"Calm summary <150 words","three_bullet_lines":"Exactly 3 short lines for Today State 25","then_vs_now_line":"1-2 sentences progress comparison","partner_share_line":"Clean photocard line","photocard_witty_line":"Playful/Witty photocard line","suggest_dose_adjustment":"Boolean","memory_confirmation_question":"Nullable confirmation object","milestone_competency_updates":"Competency status per milestone"}'::jsonb,
   '{"type":"object","required":["ai_summary","three_bullet_lines","then_vs_now_line","partner_share_line","photocard_witty_line","on_track","milestone_competency_updates"],"properties":{"ai_summary":{"type":"string"},"three_bullet_lines":{"type":"array","items":{"type":"string"}},"then_vs_now_line":{"type":"string"},"partner_share_line":{"type":"string"},"photocard_witty_line":{"type":"string"},"on_track":{"type":"boolean"},"needs_journey_replan":{"type":"boolean"},"suggest_dose_adjustment":{"type":"boolean"},"dose_adjustment_prompt":{"type":["string","null"]},"plan_changes":{"type":"string"},"memory_confirmation_question":{"type":["object","null"],"properties":{"memory_id":{"type":"string"},"scope":{"type":"string"},"fact":{"type":"string"},"question_text":{"type":"string"}}},"milestone_competency_updates":{"type":"array","items":{"type":"object","required":["milestone_position","competency_status"],"properties":{"milestone_position":{"type":"integer"},"competency_status":{"type":"string"}}}},"proposed_memory_ops":{"type":"array","items":{"type":"object","required":["op","scope","bucket","fact","source","confidence"],"properties":{"op":{"type":"string","enum":["UPSERT","RESOLVE","EXPIRE"]},"scope":{"type":"string","enum":["PERSON","DOMAIN","GOAL"]},"bucket":{"type":"string"},"fact":{"type":"string"},"source":{"type":"string"},"confidence":{"type":"number"},"valid_until":{"type":["string","null"]}}}}}}'::jsonb,
   ARRAY['language', 'goal_title', 'execution_mode', 'plan_style', 'week_number', 'total_weeks', 'current_baseline', 'user_state', 'win_strategy_directive', 'behavior_signals_json', 'completed_tasks_json', 'carried_or_skipped_tasks_json', 'reality_check_measurements_json', 'day_notes_json', 'effort_ratings_summary_json', 'all_milestones_json', 'context_pack_json', 'day_time_map_json'],
@@ -678,24 +688,26 @@ INSERT INTO public.prompt_versions (
   'PIPELINE_6_REPLAN',
   'PIPELINE',
   1,
-  'Re-plan ONLY the remaining unfinished milestones for ''{{goal_title}}'' so the user has a realistic, trustworthy path forward.
+  'Re-plan ONLY the remaining unfinished milestones so the user has a realistic, trustworthy path forward.
 
-RE-PLAN CONTEXT:
-• Reason (''EXTEND_DEADLINE'' | ''LONG_BREAK_7_DAYS'' | ''MILESTONE_NOT_QUITE'' | ''CONTINUE_ABANDONED'' | ''MANUAL_RESTRUCTURE'' | ''SHRINK_TO_MVG'' | ''PIVOT_STRATEGY'' | ''DOSE_ADJUSTMENT''): {{replan_reason}}
-• Goal Why: {{goal_why}} | Mode: {{execution_mode}} | Style: {{plan_style}} | Friction Cause: {{miss_cause}} | State: {{user_state}} | Win Directive: {{win_strategy_directive}}
+INPUT CONTEXT:
+• Target Language: {{language}} | Goal: {{goal_title}} | Why: {{goal_why}} | Execution Mode: {{execution_mode}} | Plan Style: {{plan_style}}
+• Re-Plan Reason (''EXTEND_DEADLINE'' | ''LONG_BREAK_7_DAYS'' | ''MILESTONE_NOT_QUITE'' | ''CONTINUE_ABANDONED'' | ''MANUAL_RESTRUCTURE'' | ''SHRINK_TO_MVG'' | ''PIVOT_STRATEGY'' | ''DOSE_ADJUSTMENT''): {{replan_reason}}
+• Friction Cause: {{miss_cause}} | User State: {{user_state}} | Win Strategy Directive: {{win_strategy_directive}}
 • New Deadline: {{new_deadline_date}} ({{remaining_weeks}} weeks left; {{available_hours_remaining}}h available at {{hours_per_day}}h/day on {{working_days}})
-• ALREADY COMPLETED MILESTONES (LOCKED — DO NOT ALTER OR REPEAT): {{completed_milestones_json}}
+• Completed Milestones (LOCKED — DO NOT ALTER OR REPEAT): {{completed_milestones_json}}
 • Completed Work Summary: {{completed_tasks_summary_json}}
 • Current Unfinished Milestones: {{unfinished_milestones_json}}
-• Ranked Context Pack (''ctx_XX'' IDs): {{context_pack_json}} | Recent Notes: {{recent_day_notes_json}}
+• Ranked Context Pack (''ctx_XX'' IDs): {{context_pack_json}}
+• Recent Day Notes: {{recent_day_notes_json}}
 
 STRICT RE-PLANNING RULES:
-1. Preserve Completed Work: Everything in {{completed_milestones_json}} and {{completed_tasks_summary_json}} is locked; never modify, drop, or repeat completed milestones.
+1. Preserve Completed Work: Everything in Completed Milestones and Completed Work Summary is locked; never modify, drop, or repeat completed milestones.
 2. Execute Exact Re-Plan Trigger:
    • ''SHRINK_TO_MVG'': Cut remaining scope to the core 30–50% essential shippable outcome (2–3 lean milestones max) so the user finishes something real instead of quitting.
-   • ''PIVOT_STRATEGY'': Keep the goal outcome, discard the stalled approach, and build a fresh, practical strategy grounded in {{recent_day_notes_json}} and {{context_pack_json}}.
-   • ''DOSE_ADJUSTMENT'': Recalibrate remaining milestone targets and weekly pacing without guilt; if {{miss_cause}} is ''LIFE_BUSY'', keep the core method and adjust calendar pacing.
-3. 8-Milestone Cap & Attribution: Total milestones (completed + revised) MUST stay <= 8. Provide realistic ''estimated_hours'', a calm ''replan_summary'' in {{language}}, and exact ''ctx_XX'' IDs from {{context_pack_json}} in ''used_context_ids''.',
+   • ''PIVOT_STRATEGY'': Keep the goal outcome, discard the stalled approach, and build a fresh, practical strategy grounded in Recent Day Notes and Ranked Context Pack.
+   • ''DOSE_ADJUSTMENT'': Recalibrate remaining milestone targets and weekly pacing without guilt; if Friction Cause is ''LIFE_BUSY'', keep the core method and adjust calendar pacing.
+3. 8-Milestone Cap & Attribution: Total milestones (completed + revised) MUST stay <= 8. Provide realistic ''estimated_hours'', a calm ''replan_summary'' in the target language, and exact ''ctx_XX'' IDs from Ranked Context Pack in ''used_context_ids''.',
   '{"replan_summary":"1-2 calm sentences in {{language}} explaining what changed","used_context_ids":"Array of context IDs that shaped re-plan","revised_remaining_milestones":"Array of revised unfinished milestones"}'::jsonb,
   '{"type":"object","required":["replan_summary","used_context_ids","revised_remaining_milestones"],"properties":{"replan_summary":{"type":"string"},"used_context_ids":{"type":"array","items":{"type":"string"}},"revised_remaining_milestones":{"type":"array","items":{"type":"object","required":["position","title","expected_result","estimated_hours"],"properties":{"position":{"type":"integer"},"title":{"type":"string"},"expected_result":{"type":"string"},"estimated_hours":{"type":"number"},"target_metric_value":{"type":["number","null"]},"target_metric_unit":{"type":["string","null"]}}}}}}'::jsonb,
   ARRAY['language', 'goal_title', 'goal_why', 'execution_mode', 'plan_style', 'replan_reason', 'miss_cause', 'user_state', 'win_strategy_directive', 'new_deadline_date', 'remaining_weeks', 'available_hours_remaining', 'hours_per_day', 'working_days', 'completed_milestones_json', 'completed_tasks_summary_json', 'unfinished_milestones_json', 'context_pack_json', 'recent_day_notes_json'],
