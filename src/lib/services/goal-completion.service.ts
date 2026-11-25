@@ -9,10 +9,7 @@ import 'server-only';
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
-import {
-  Pipeline7NextGoalBridgeSchema,
-  type Pipeline7Output,
-} from '@/types/ai-schemas';
+import { Pipeline7NextGoalBridgeSchema, type Pipeline7Output } from '@/types/ai-schemas';
 import type { GoalRow, MilestoneRow, TaskRow } from '@/types/db/goal-tables';
 
 export interface CompleteGoalParams {
@@ -38,10 +35,7 @@ export async function completeGoalWithJourneyCard(params: CompleteGoalParams) {
     if (goal.status !== 'COMPLETED') {
       await admin
         .from('goals')
-        .update({
-          status: 'COMPLETED',
-          completed_at: new Date().toISOString(),
-        })
+        .update({ status: 'COMPLETED', completed_at: new Date().toISOString() })
         .eq('id', goal.id);
     }
     return {
@@ -51,22 +45,32 @@ export async function completeGoalWithJourneyCard(params: CompleteGoalParams) {
     };
   }
 
-  const { data: proofs } = await admin
-    .from('evidence')
-    .select('id, uploaded_at')
-    .eq('goal_id', goal.id)
-    .order('uploaded_at', { ascending: true });
+  const [{ data: proofs }, { data: allDoneDates }, { data: user }] = await Promise.all([
+    admin
+      .from('evidence')
+      .select('id, type, caption_note, uploaded_at')
+      .eq('goal_id', goal.id)
+      .order('uploaded_at', { ascending: true }),
+    admin
+      .from('tasks')
+      .select('completed_at')
+      .eq('goal_id', goal.id)
+      .eq('status', 'DONE')
+      .not('completed_at', 'is', null),
+    admin.from('users').select('language, country').eq('id', userId).single(),
+  ]);
 
   const evidenceList = proofs || [];
   const firstProofId = evidenceList[0]?.id;
   const lastProofId = evidenceList[evidenceList.length - 1]?.id;
   const featuredEvidenceIds = [firstProofId, lastProofId].filter(Boolean) as string[];
 
-  const { data: user } = await admin
-    .from('users')
-    .select('language, country')
-    .eq('id', userId)
-    .single();
+  const activeDaysSet = new Set(
+    (allDoneDates || [])
+      .map((t) => (t.completed_at ? String(t.completed_at).slice(0, 10) : ''))
+      .filter(Boolean)
+  );
+  const activeDaysCount = activeDaysSet.size || completedTasks.length;
 
   const firewall7 = await checkAIFirewall({ userId, pipeline: 'PIPELINE_7', goalId: goal.id });
   if (!firewall7.allowed) {
@@ -88,11 +92,16 @@ export async function completeGoalWithJourneyCard(params: CompleteGoalParams) {
         goal_category: goal.category,
         execution_mode: goal.execution_mode,
         total_weeks: goal.current_week_number,
-        active_days_count: completedTasks.length,
+        active_days_count: activeDaysCount,
         current_baseline: goal.current_baseline_text,
         completed_milestones_json: allMilestones,
-        top_proofs_summary_json: evidenceList.slice(0, 5),
-        comeback_weeks_count: 0,
+        top_proofs_summary_json: evidenceList.slice(0, 5).map((e) => ({
+          id: e.id,
+          type: e.type,
+          caption_note: e.caption_note || '',
+          uploaded_at: e.uploaded_at,
+        })),
+        comeback_weeks_count: goal.comeback_weeks_count || 0,
         context_pack_json: contextPack,
       },
     },
@@ -115,10 +124,7 @@ export async function completeGoalWithJourneyCard(params: CompleteGoalParams) {
 
   await admin
     .from('goals')
-    .update({
-      status: 'COMPLETED',
-      completed_at: new Date().toISOString(),
-    })
+    .update({ status: 'COMPLETED', completed_at: new Date().toISOString() })
     .eq('id', goal.id);
 
   await admin.from('notifications').insert({

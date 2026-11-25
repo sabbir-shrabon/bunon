@@ -3,19 +3,21 @@ import 'server-only';
  * 1. Purpose: Pure domain service for assembling the complete Today screen plan, persona, and banner state.
  * 2. Spec Ref: Database Schema v2.5 Section 5, Prompt Catalog Rule 6, & Category C Screens 22-37b.
  * 3. Called By: /api/today route handler and future MCP server tools.
- * 4. Calls: Admin Supabase client, persona-engine, step-slicer, and day-note-service.
+ * 4. Calls: Admin Supabase client, goal-signals, step-slicer, today-evidence, and day-note-service.
  */
 
 import { createAdminClient } from '@/lib/db/admin';
 import { isUserProActive } from '@/lib/auth/entitlement';
-import { evaluatePersonaProfile, type PersonaProfile } from '@/lib/ai/persona-engine';
+import { loadGoalIntelligenceSignals } from '@/lib/ai/goal-signals';
+import type { PersonaProfile } from '@/lib/ai/persona-engine';
 import { sliceAdaptiveSteps, type StepSlicerResult } from '@/lib/ai/step-slicer';
 import { getTodayDayNote } from './day-note-service';
 import { evaluateContextBanner, type ContextBannerData, type ContextBannerType } from './context-banner-service';
+import { fetchDoneTasksEvidenceMap } from './today-evidence';
 import type { GoalRow, MilestoneRow, TaskRow } from '@/types/db/goal-tables';
-import type { DayNoteRow, EvidenceRow } from '@/types/db/evidence-tables';
+import type { DayNoteRow } from '@/types/db/evidence-tables';
 import type { HowToStepsData, SubStepItem } from '@/types/domain';
-import type { TaskEvidenceItem, ThreadTaskItem } from '@/components/today/types';
+import type { ThreadTaskItem } from '@/components/today/types';
 
 export type { ContextBannerData, ContextBannerType };
 
@@ -53,11 +55,7 @@ export async function getTodayPlan(
       .eq('user_id', userId)
       .in('status', ['ACTIVE', 'DRAFT', 'PAUSED'])
       .order('created_at', { ascending: false }),
-    admin
-      .from('users')
-      .select('pro_until')
-      .eq('id', userId)
-      .maybeSingle(),
+    admin.from('users').select('pro_until').eq('id', userId).maybeSingle(),
   ]);
 
   const proUntil = userProfile?.pro_until ?? null;
@@ -71,15 +69,12 @@ export async function getTodayPlan(
     };
   }
 
-  const activeGoal =
+  const activeGoalRow =
     (requestedGoalId ? userGoals.find((g) => g.id === requestedGoalId) : null) ||
     userGoals.find((g) => g.status === 'ACTIVE') ||
     userGoals[0];
-
+  const activeGoal = activeGoalRow as unknown as GoalRow;
   const isPaused = activeGoal.status === 'PAUSED';
-
-  // 1. Parallelize independent queries: goal summaries, week tasks, milestones, done tasks, recent tasks/evidence, and today's day note
-  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString();
 
   const goalSummariesPromise = Promise.all(
     userGoals.map(async (g) => {
@@ -93,122 +88,38 @@ export async function getTodayPlan(
     })
   );
 
-  const weekTasksPromise = admin
-    .from('tasks')
-    .select('*')
-    .eq('goal_id', activeGoal.id)
-    .eq('week_number', activeGoal.current_week_number)
-    .order('sequence_order', { ascending: true });
-
-  const allMilestonesPromise = admin
-    .from('milestones')
-    .select('*')
-    .eq('goal_id', activeGoal.id);
-
-  const doneTasksPromise = admin
-    .from('tasks')
-    .select('*')
-    .eq('goal_id', activeGoal.id)
-    .eq('status', 'DONE')
-    .order('completed_at', { ascending: true });
-
-  const recentTasksPromise = admin
-    .from('tasks')
-    .select('*')
-    .eq('goal_id', activeGoal.id)
-    .gte('created_at', fourteenDaysAgo);
-
-  const recentEvidencePromise = admin
-    .from('evidence')
-    .select('*')
-    .eq('user_id', userId)
-    .order('uploaded_at', { ascending: false })
-    .limit(10);
-
-  const todayDayNotePromise = getTodayDayNote(userId, activeGoal.id);
-
-  const [
-    goalSummaries,
-    { data: weekTasks },
-    { data: allMilestones },
-    { data: rawDoneTasks },
-    { data: recentTasks },
-    { data: recentEvidence },
-    todayDayNote,
-  ] = await Promise.all([
-    goalSummariesPromise,
-    weekTasksPromise,
-    allMilestonesPromise,
-    doneTasksPromise,
-    recentTasksPromise,
-    recentEvidencePromise,
-    todayDayNotePromise,
-  ]);
+  const [goalSummaries, { data: weekTasks }, { data: allMilestones }, { data: rawDoneTasks }, signals, todayDayNote] =
+    await Promise.all([
+      goalSummariesPromise,
+      admin
+        .from('tasks')
+        .select('*')
+        .eq('goal_id', activeGoal.id)
+        .eq('week_number', activeGoal.current_week_number)
+        .order('sequence_order', { ascending: true }),
+      admin.from('milestones').select('*').eq('goal_id', activeGoal.id),
+      admin
+        .from('tasks')
+        .select('*')
+        .eq('goal_id', activeGoal.id)
+        .eq('status', 'DONE')
+        .order('completed_at', { ascending: true }),
+      loadGoalIntelligenceSignals({ supabaseAdmin: admin, goal: activeGoal }),
+      getTodayDayNote(userId, activeGoal.id),
+    ]);
 
   const tasks = (weekTasks || []) as unknown as TaskRow[];
   const doneTasks = (rawDoneTasks || []) as unknown as TaskRow[];
   const milestonesList = (allMilestones || []) as unknown as MilestoneRow[];
   const milestoneMap = new Map(milestonesList.map((m) => [m.id, m]));
+  const evidenceMap = await fetchDoneTasksEvidenceMap(admin, doneTasks.map((t) => t.id));
 
-  // 2. Fetch evidence rows with 1-hour signed view URLs for all completed tasks
-  const doneTaskIds = doneTasks.map((t) => t.id);
-  const evidenceMap = new Map<string, TaskEvidenceItem[]>();
-
-  if (doneTaskIds.length > 0) {
-    const { data: rawEvidence } = await admin
-      .from('evidence')
-      .select('id, task_id, type, storage_path, external_url, caption_note, file_size_bytes, uploaded_at')
-      .in('task_id', doneTaskIds)
-      .order('uploaded_at', { ascending: false });
-
-    if (rawEvidence && rawEvidence.length > 0) {
-      const evidenceWithSigned = await Promise.all(
-        rawEvidence.map(async (row) => {
-          let signedUrl: string | null = null;
-          if (row.storage_path) {
-            const normalized = row.storage_path.replace(/^\/+/, '').replace(/^bunon-proofs\//, '');
-            const { data: signed, error: signErr } = await admin.storage
-              .from('bunon-proofs')
-              .createSignedUrl(normalized, 3600);
-            if (signErr) {
-              console.error('[signed-url error]', { path: normalized, error: signErr });
-            } else {
-              signedUrl = signed?.signedUrl || null;
-            }
-          } else if (row.external_url) {
-            signedUrl = row.external_url;
-          }
-          return {
-            id: row.id,
-            type: row.type,
-            storage_path: row.storage_path,
-            signed_url: signedUrl,
-            external_url: row.external_url,
-            caption_note: row.caption_note,
-            file_size_bytes: Number(row.file_size_bytes) || 0,
-            uploaded_at: row.uploaded_at,
-            task_id: row.task_id,
-          };
-        })
-      );
-
-      evidenceWithSigned.forEach((ev) => {
-        const list = evidenceMap.get(ev.task_id) || [];
-        list.push(ev);
-        evidenceMap.set(ev.task_id, list);
-      });
-    }
-  }
-
-  // 3. Active Hero task: strictly first PENDING task ordered by sequence_order ASC
   const pendingTasks = tasks
     .filter((t) => t.status === 'PENDING')
     .sort((a, b) => a.sequence_order - b.sequence_order);
-
   const heroTask = pendingTasks[0] || null;
 
-  const combinedTasks = [...doneTasks, ...pendingTasks];
-  const threadTasks: ThreadTaskItem[] = combinedTasks.map((t) => {
+  const threadTasks: ThreadTaskItem[] = [...doneTasks, ...pendingTasks].map((t) => {
     const m = milestoneMap.get(t.milestone_id);
     return {
       ...t,
@@ -226,23 +137,12 @@ export async function getTodayPlan(
     activeWeekTasks.length > 0 &&
     pendingTasks.length === 0 &&
     activeWeekTasks.every((t) => t.status === 'DONE' || t.status === 'SKIPPED_BASIC');
-
   const remainingWeekTasks = heroTask ? tasks.filter((t) => t.id !== heroTask.id) : tasks;
 
-  // 4. Current milestone (resolved synchronously from prefetched milestones)
-  const milestone = (
-    heroTask
+  const milestone =
+    (heroTask
       ? milestonesList.find((m) => m.id === heroTask.milestone_id)
-      : milestonesList.find((m) => m.status === 'ACTIVE') || milestonesList[0]
-  ) || null;
-
-  // 5. Persona profile & Adaptive Slice
-  const persona = evaluatePersonaProfile({
-    scheduledWorkingDays: activeGoal.working_days || [0, 1, 2, 3, 4],
-    lastActivityDate: activeGoal.last_activity_date,
-    tasksLast14Days: (recentTasks || []) as unknown as TaskRow[],
-    evidenceLast10: (recentEvidence || []) as unknown as EvidenceRow[],
-  });
+      : milestonesList.find((m) => m.status === 'ACTIVE') || milestonesList[0]) || null;
 
   const rawSteps = (heroTask?.how_to_steps_json as unknown as HowToStepsData) || { steps: [] };
   const heroTaskSteps: SubStepItem[] = Array.isArray(rawSteps.steps) ? rawSteps.steps : [];
@@ -253,12 +153,9 @@ export async function getTodayPlan(
     adaptiveSlice = sliceAdaptiveSteps(heroTaskSteps, dailyBudget);
   }
 
-  const banner = evaluateContextBanner(activeGoal, persona, isWeekDone, milestone as unknown as MilestoneRow | null);
-
-  let streakText: string | null = null;
-  if (activeGoal.streak_weeks >= 2) {
-    streakText = `Streak: ${activeGoal.streak_weeks} weeks`;
-  }
+  const persona = signals.persona;
+  const banner = evaluateContextBanner(activeGoal, persona, isWeekDone, milestone);
+  const streakText = activeGoal.streak_weeks >= 2 ? `Streak: ${activeGoal.streak_weeks} weeks` : null;
 
   return {
     hasActiveGoal: true,
@@ -266,8 +163,8 @@ export async function getTodayPlan(
     isPro,
     proUntil,
     goals: goalSummaries,
-    activeGoal: activeGoal as unknown as GoalRow,
-    currentMilestone: milestone as unknown as MilestoneRow | null,
+    activeGoal,
+    currentMilestone: milestone,
     heroTask,
     heroTaskSteps,
     adaptiveSlice,

@@ -1,6 +1,6 @@
 import 'server-only';
 /**
- * 1. Purpose: Assembles 4 prompt layers, calls Google Gemini with 12s timeout + zero thinking, validates JSON, and logs telemetry.
+ * 1. Purpose: Assembles 4 prompt layers, calls Google Gemini with 12s timeout + failover, validates JSON, and logs telemetry.
  * 2. Spec Ref: Prompt Catalog v2.5 Sections 1–7 & Database Schema Section 2.
  * 3. Called By: Pipeline runners in Next.js API routes and server services.
  * 4. Calls: @google/genai, Admin Supabase client, Zod schemas, and assembler-helpers.
@@ -11,18 +11,17 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/db/admin';
 import type { AIPipelineKey } from '@/types/domain';
 import {
-  DEFAULT_REGIONAL_BD_CONTEXT,
-  DEFAULT_REGIONAL_GLOBAL_CONTEXT,
-} from './regional-constants';
-import {
   DEFAULT_PIPELINE_PROMPTS,
+  assembleSystemInstruction,
   buildGenerateConfig,
   calculateCostUsd,
   generateWithTimeout,
   getAlternateModel,
   isInvalidArgumentError,
   isTransientAIError,
+  normalizeGeminiModel,
   renderVariables,
+  resolveRegionalContext,
 } from './assembler-helpers';
 
 export { renderVariables };
@@ -37,10 +36,7 @@ export interface PromptAssemblyContext {
   category?: string;
   variables: Record<string, string | number | boolean | unknown>;
   responseSchema?: Record<string, unknown>;
-  inlineParts?: Array<{
-    mimeType: string;
-    data: string;
-  }>;
+  inlineParts?: Array<{ mimeType: string; data: string }>;
 }
 
 export async function executeAIPipeline<T>(
@@ -52,7 +48,7 @@ export async function executeAIPipeline<T>(
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
 
   const ai = new GoogleGenAI({ apiKey });
-  const pipelineKey = `${ctx.pipeline}_` as string;
+  const pipelineKey = `${ctx.pipeline}_`;
 
   const { data: prompts } = await admin
     .from('prompt_versions')
@@ -67,6 +63,7 @@ export async function executeAIPipeline<T>(
     promptMap.get('CORE_LANGUAGE_RULES')?.template_text ||
     'Target language: {{language}}. Output user-facing text in this language. Keep JSON keys in English.';
 
+  const categoryOrOther = ctx.category || 'OTHER';
   const skillKey = ctx.category ? `SKILL_${ctx.category}` : 'SKILL_OTHER';
   const skillText =
     promptMap.get(skillKey)?.template_text ||
@@ -74,40 +71,41 @@ export async function executeAIPipeline<T>(
     '';
 
   const isBd = (ctx.country || 'BD').toUpperCase() === 'BD';
-  const { data: regionalRows } = await admin
-    .from('regional_knowledge')
-    .select('content_text')
-    .eq('country', isBd ? 'BD' : 'GLOBAL')
-    .eq('active', true);
-
-  const regionalText =
-    regionalRows?.[0]?.content_text ||
-    (isBd ? DEFAULT_REGIONAL_BD_CONTEXT : DEFAULT_REGIONAL_GLOBAL_CONTEXT);
-
-  const pipelinePromptRow = (prompts || []).find((p) =>
-    p.prompt_key.startsWith(pipelineKey)
+  const regionTag: 'BD' | 'GLOBAL' = isBd ? 'BD' : 'GLOBAL';
+  const regionalKey = isBd ? 'REGIONAL_BD_CONTEXT' : 'REGIONAL_GLOBAL_CONTEXT';
+  const regionalText = await resolveRegionalContext(
+    admin,
+    promptMap.get(regionalKey)?.template_text,
+    regionTag
   );
+
+  const pipelinePromptRow = (prompts || []).find((p) => p.prompt_key.startsWith(pipelineKey));
   const pipelineText =
     pipelinePromptRow?.template_text || DEFAULT_PIPELINE_PROMPTS[ctx.pipeline] || '';
   const promptVersionId = pipelinePromptRow?.id;
 
-  const allVars = {
+  const allVars: Record<string, unknown> = {
     ...ctx.variables,
     language: ctx.language,
     user_country: ctx.country || 'BD',
+    current_date: ctx.variables.current_date || new Date().toISOString().slice(0, 10),
+    preferred_coaching_tone: ctx.variables.preferred_coaching_tone || 'GENTLE',
+    goal_category: ctx.variables.goal_category || categoryOrOther,
   };
 
-  const systemInstruction = [coreIdentity, coreLang, skillText, regionalText]
-    .map((t) => renderVariables(t, allVars))
-    .filter(Boolean)
-    .join('\n\n---\n\n');
+  const systemInstruction = assembleSystemInstruction({
+    coreIdentity,
+    coreLang,
+    skillText,
+    regionalText,
+    language: ctx.language,
+    categoryOrOther,
+    regionTag,
+    variables: allVars,
+  });
 
   const userContent = renderVariables(pipelineText, allVars);
-  const rawModel = ctx.model || 'gemini-3.5-flash-lite';
-  let activeModel =
-    rawModel.includes('2.5') || rawModel.includes('2.0') || rawModel.includes('1.5')
-      ? 'gemini-3.5-flash-lite'
-      : rawModel;
+  let activeModel = normalizeGeminiModel(ctx.model);
 
   const rawSchema = ctx.responseSchema || pipelinePromptRow?.locked_output_schema_json || undefined;
   const schemaObj =
@@ -176,9 +174,7 @@ export async function executeAIPipeline<T>(
           console.warn(
             `[Bunon AI] ${activeModel} ${isTimeout ? 'timed out after 12s' : 'hit 503/429'}; switching to ${fallback}`
           );
-          if (!isTimeout) {
-            await new Promise((resolve) => setTimeout(resolve, 300));
-          }
+          if (!isTimeout) await new Promise((resolve) => setTimeout(resolve, 300));
           activeModel = fallback;
           const fallbackConfig = buildGenerateConfig(activeModel, systemInstruction, schemaObj);
           response = await generateWithTimeout(ai, activeModel, contents, fallbackConfig);
@@ -187,16 +183,14 @@ export async function executeAIPipeline<T>(
         }
       }
 
-      const rawResponseText = response.text || '';
       tokensIn += response.usageMetadata?.promptTokenCount || 0;
       tokensOut += response.usageMetadata?.candidatesTokenCount || 0;
 
-      const parsed = JSON.parse(rawResponseText);
+      const parsed = JSON.parse(response.text || '');
       validatedOutput = schema.parse(parsed);
       break;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-
       if (isTransientAIError(err)) {
         console.error('[Bunon AI]', {
           pipeline: ctx.pipeline,
@@ -208,10 +202,10 @@ export async function executeAIPipeline<T>(
         throw lastError;
       }
 
-      let zodIssues: Array<{ path: string; message: string }> | undefined;
-      if (err instanceof z.ZodError) {
-        zodIssues = err.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
-      }
+      const zodIssues =
+        err instanceof z.ZodError
+          ? err.issues.map((i) => ({ path: i.path.join('.'), message: i.message }))
+          : undefined;
       console.error('[Bunon AI]', {
         pipeline: ctx.pipeline,
         model: activeModel,
@@ -219,7 +213,6 @@ export async function executeAIPipeline<T>(
         error: lastError.message,
         ...(zodIssues ? { zodIssues } : {}),
       });
-
       if (attempt === 2) {
         await logAiCall('SCHEMA_FAILED', lastError.message);
         throw lastError;

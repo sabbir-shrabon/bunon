@@ -3,14 +3,16 @@ import 'server-only';
  * 1. Purpose: Domain service for Pipeline 6 roadmap re-planning and applying revised milestone structures.
  * 2. Spec Ref: UI Design Guide Category E Screens 52, 55, 56 and Pipeline 6.
  * 3. Called By: /api/goals/[id]/replan and roadmap-service.ts.
- * 4. Calls: Admin Supabase client, Pipeline 6, and context-pack.
+ * 4. Calls: Admin Supabase client, Pipeline 6, context-pack, and goal-signals.
  */
 
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
 import { buildContextPack } from '@/lib/ai/context-pack';
+import { loadGoalIntelligenceSignals } from '@/lib/ai/goal-signals';
 import { Pipeline6ReplanSchema, type Pipeline6Output } from '@/types/ai-schemas';
+import type { GoalRow } from '@/types/db/goal-tables';
 
 export async function replanGoal(
   userId: string,
@@ -20,42 +22,38 @@ export async function replanGoal(
 ) {
   const admin = createAdminClient();
 
-  const { data: goal } = await admin
+  const { data: goalRow } = await admin
     .from('goals')
     .select('*')
     .eq('id', goalId)
     .eq('user_id', userId)
     .single();
 
-  if (!goal) throw new Error('Goal not found');
+  if (!goalRow) throw new Error('Goal not found');
+  const goal = goalRow as unknown as GoalRow;
+  const deadlineDate = newDeadline || goal.deadline;
 
-  const { data: user } = await admin
-    .from('users')
-    .select('id, person_memory_json, language, country')
-    .eq('id', userId)
-    .single();
-
-  const { data: milestones } = await admin
-    .from('milestones')
-    .select('*')
-    .eq('goal_id', goalId)
-    .order('position', { ascending: true });
+  const [{ data: user }, { data: milestones }, { data: doneTaskRows }, signals] = await Promise.all([
+    admin.from('users').select('id, person_memory_json, language, country, preferred_coaching_tone').eq('id', userId).single(),
+    admin.from('milestones').select('*').eq('goal_id', goalId).order('position', { ascending: true }),
+    admin
+      .from('tasks')
+      .select('title')
+      .eq('goal_id', goalId)
+      .eq('status', 'DONE')
+      .order('completed_at', { ascending: false })
+      .limit(20),
+    loadGoalIntelligenceSignals({ supabaseAdmin: admin, goal: { ...goal, deadline: deadlineDate } }),
+  ]);
 
   const completedMilestones = (milestones || []).filter((m) => m.status === 'DONE');
   const unfinishedMilestones = (milestones || []).filter((m) => m.status !== 'DONE');
-
-  const contextPack = buildContextPack(
-    user?.person_memory_json,
-    goal.journey_memory_json,
-    goal.category,
-    15
-  );
+  const contextPack = buildContextPack(user?.person_memory_json, goal.journey_memory_json, goal.category, 15);
 
   const firewall = await checkAIFirewall({ userId, pipeline: 'PIPELINE_6', goalId });
   if (!firewall.allowed) {
     throw new AIFirewallError(firewall.reason || 'FIREWALL_BLOCKED', firewall.retryAfterSeconds);
   }
-  const deadlineDate = newDeadline || goal.deadline;
 
   const p6Output = await executeAIPipeline<Pipeline6Output>(
     {
@@ -73,18 +71,19 @@ export async function replanGoal(
         plan_style: goal.plan_style,
         replan_reason: replanReason,
         miss_cause: goal.last_miss_cause || '',
-        user_state: goal.user_state,
-        win_strategy_directive: 'Re-anchor on minimum viable deliverables',
+        preferred_coaching_tone: user?.preferred_coaching_tone || 'GENTLE',
+        user_state: signals.persona.user_state,
+        win_strategy_directive: signals.persona.win_strategy_directive,
         new_deadline_date: deadlineDate,
-        remaining_weeks: 8,
-        available_hours_remaining: 40,
+        remaining_weeks: signals.remainingWeeks,
+        available_hours_remaining: signals.availableHoursRemaining,
         hours_per_day: goal.hours_per_day,
         working_days: goal.working_days,
         completed_milestones_json: completedMilestones,
-        completed_tasks_summary_json: [],
+        completed_tasks_summary_json: (doneTaskRows || []).map((t) => t.title),
         unfinished_milestones_json: unfinishedMilestones,
         context_pack_json: contextPack,
-        recent_day_notes_json: [],
+        recent_day_notes_json: signals.recentDayNotes,
       },
     },
     Pipeline6ReplanSchema
@@ -106,14 +105,8 @@ export async function applyReplan(
 ) {
   const admin = createAdminClient();
 
-  // 1. Delete unfinished milestones
-  await admin
-    .from('milestones')
-    .delete()
-    .eq('goal_id', goalId)
-    .neq('status', 'DONE');
+  await admin.from('milestones').delete().eq('goal_id', goalId).neq('status', 'DONE');
 
-  // 2. Insert revised milestones
   for (const m of revisedMilestones) {
     await admin.from('milestones').insert({
       goal_id: goalId,
@@ -127,17 +120,9 @@ export async function applyReplan(
     });
   }
 
-  // 3. Update restructure count & deadline
-  const { data: currentGoal } = await admin
-    .from('goals')
-    .select('restructure_count')
-    .eq('id', goalId)
-    .single();
-
+  const { data: currentGoal } = await admin.from('goals').select('restructure_count').eq('id', goalId).single();
   const nextCount = ((currentGoal?.restructure_count as number) || 0) + 1;
-  const updates: Record<string, unknown> = {
-    restructure_count: nextCount,
-  };
+  const updates: Record<string, unknown> = { restructure_count: nextCount };
   if (newDeadline) updates.deadline = newDeadline;
 
   await admin.from('goals').update(updates).eq('id', goalId).eq('user_id', userId);

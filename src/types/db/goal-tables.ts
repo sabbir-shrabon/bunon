@@ -56,7 +56,10 @@ export interface GoalRow {
   last_synced_logical_date: string | null;
   day_time_map_json: DayTimeMap;
   journey_memory_json: Record<string, unknown>;
+  memory_version: number;
   deep_memory_json: Record<string, unknown>;
+  comeback_weeks_count?: number;
+  last_miss_cause?: string | null;
   memory_scope: MemoryScope;
   visibility: GoalVisibility;
   version_number: number;

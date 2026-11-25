@@ -1,13 +1,19 @@
 import 'server-only';
 /**
- * 1. Purpose: Shared Gemini SDK timeout wrapper, fallback model helpers, and default prompt templates.
+ * 1. Purpose: Shared Gemini SDK timeout wrapper, model normalization, system prompt builder, and defaults.
  * 2. Spec Ref: Prompt Catalog v2.5 Sections 1–7 & Vercel 60s timeout budget guard.
  * 3. Called By: src/lib/ai/assembler.ts.
- * 4. Calls: @google/genai GenerateContentParameters.
+ * 4. Calls: @google/genai GenerateContentParameters and regional-constants.
  */
 
 import type { GenerateContentConfig, GoogleGenAI, Part } from '@google/genai';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/database';
 import type { AIPipelineKey } from '@/types/domain';
+import {
+  DEFAULT_REGIONAL_BD_CONTEXT,
+  DEFAULT_REGIONAL_GLOBAL_CONTEXT,
+} from './regional-constants';
 
 export const GEMINI_ATTEMPT_TIMEOUT_MS = 12_000;
 
@@ -25,6 +31,16 @@ export const DEFAULT_PIPELINE_PROMPTS: Record<AIPipelineKey, string> = {
     'Generate Journey Card copy and 3 Next Chapter goal suggestions for finished goal {{goal_title}}. Why: {{goal_why}}, Day-1 baseline: {{current_baseline}}, proofs: {{top_proofs_summary_json}}.',
 };
 
+const INSTRUCTION_PRIORITY_HEADER = [
+  '### INSTRUCTION PRIORITY',
+  'If instructions ever conflict, follow this strict order:',
+  '1. Safety & Distress Rules',
+  "2. User's Locked Memory & User's Exact Outline (FOLLOW_OUTLINE)",
+  '3. Algorithmic Win Strategy Directive',
+  '4. Pipeline Task Rules & Locked Output Schema',
+  '5. Domain Skill & Regional Context',
+].join('\n');
+
 export function renderVariables(
   template: string,
   variables: Record<string, unknown>
@@ -35,6 +51,77 @@ export function renderVariables(
     if (typeof val === 'object') return JSON.stringify(val);
     return String(val);
   });
+}
+
+export async function resolveRegionalContext(
+  admin: SupabaseClient<Database>,
+  promptTemplate: string | undefined,
+  regionTag: 'BD' | 'GLOBAL'
+): Promise<string> {
+  if (promptTemplate && promptTemplate.trim().length > 0) return promptTemplate;
+
+  const { data: regionalRows } = await admin
+    .from('regional_knowledge')
+    .select('content_text')
+    .eq('country', regionTag)
+    .eq('active', true);
+
+  const dbRegional = regionalRows?.[0]?.content_text;
+  if (dbRegional && dbRegional.trim().length > 0) return dbRegional;
+
+  return regionTag === 'BD' ? DEFAULT_REGIONAL_BD_CONTEXT : DEFAULT_REGIONAL_GLOBAL_CONTEXT;
+}
+
+export interface SystemInstructionLayers {
+  coreIdentity: string;
+  coreLang: string;
+  skillText: string;
+  regionalText: string;
+  language: 'EN' | 'BN';
+  categoryOrOther: string;
+  regionTag: 'BD' | 'GLOBAL';
+  variables: Record<string, unknown>;
+}
+
+export function assembleSystemInstruction(layers: SystemInstructionLayers): string {
+  const renderedIdentity = renderVariables(layers.coreIdentity, layers.variables);
+  const renderedLang = renderVariables(layers.coreLang, layers.variables);
+  const renderedSkill = renderVariables(layers.skillText, layers.variables);
+  const renderedRegional = renderVariables(layers.regionalText, layers.variables);
+
+  const sections: string[] = [INSTRUCTION_PRIORITY_HEADER];
+  if (renderedIdentity.trim()) sections.push(`### LAYER 1A: SYSTEM IDENTITY\n${renderedIdentity}`);
+  if (renderedLang.trim()) {
+    sections.push(`### LAYER 1B: LANGUAGE RULES (${layers.language})\n${renderedLang}`);
+  }
+  if (renderedSkill.trim()) {
+    sections.push(`### LAYER 2: DOMAIN SKILL (${layers.categoryOrOther})\n${renderedSkill}`);
+  }
+  if (renderedRegional.trim()) {
+    sections.push(`### LAYER 3: REGIONAL CONTEXT (${layers.regionTag})\n${renderedRegional}`);
+  }
+  return sections.join('\n\n');
+}
+
+export function normalizeGeminiModel(model?: string | null): string {
+  if (!model) return 'gemini-3.5-flash-lite';
+  const trimmed = model.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (
+    lower.includes('flash-lite') ||
+    lower.includes('flash-8b') ||
+    lower.includes('lite') ||
+    lower.includes('8b')
+  ) {
+    return 'gemini-3.5-flash-lite';
+  }
+  if (lower.includes('2.5') || lower.includes('2.0') || lower.includes('1.5')) {
+    return 'gemini-3.8-flash';
+  }
+  if (lower === 'gemini-3.5-flash-lite') return 'gemini-3.5-flash-lite';
+  if (lower === 'gemini-3.8-flash') return 'gemini-3.8-flash';
+  return trimmed;
 }
 
 export function calculateCostUsd(tokensIn: number, tokensOut: number, model: string): number {
@@ -49,9 +136,7 @@ export function getAlternateModel(model: string): string {
 export function isTransientAIError(err: unknown): boolean {
   if (!err) return false;
   const status =
-    typeof err === 'object' && err !== null
-      ? (err as Record<string, unknown>).status
-      : undefined;
+    typeof err === 'object' && err !== null ? (err as Record<string, unknown>).status : undefined;
   if (status === 503 || status === 429 || status === '503' || status === '429') return true;
   if (err instanceof Error && err.name === 'AbortError') return true;
   const msg = err instanceof Error ? err.message : String(err);
@@ -88,9 +173,7 @@ export function buildGenerateConfig(
 export function isInvalidArgumentError(err: unknown): boolean {
   if (!err) return false;
   const status =
-    typeof err === 'object' && err !== null
-      ? (err as Record<string, unknown>).status
-      : undefined;
+    typeof err === 'object' && err !== null ? (err as Record<string, unknown>).status : undefined;
   if (status === 400 || status === '400') return true;
   const msg = err instanceof Error ? err.message : String(err);
   return msg.includes('INVALID_ARGUMENT') || msg.includes('"code":400');
@@ -111,10 +194,7 @@ export async function generateWithTimeout(
       ai.models.generateContent({
         model,
         contents,
-        config: {
-          ...baseConfig,
-          abortSignal: controller.signal,
-        },
+        config: { ...baseConfig, abortSignal: controller.signal },
       }),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {

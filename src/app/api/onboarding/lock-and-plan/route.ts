@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  * 1. Purpose: Pipeline 3 API endpoint for locking the roadmap and generating Week 1 tasks.
  * 2. Spec Ref: Prompt Catalog v2.5 Section 7 Pipeline 3, Screen 20/22 & Two-Path Onboarding.
  * 3. Called By: Screen 20 "Build Week 1 & start Day 1".
- * 4. Calls: Server Supabase client, AI Firewall, Assembler, and context-pack.
+ * 4. Calls: Server Supabase client, AI Firewall, Assembler, context-pack, and memory-ops.
  */
 
 import { createClient } from '@/lib/db/server';
@@ -11,19 +11,12 @@ import { createAdminClient } from '@/lib/db/admin';
 import { checkAIFirewall } from '@/lib/ai/firewall';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { buildContextPack } from '@/lib/ai/context-pack';
+import { applyProposedMemoryOps } from '@/lib/ai/memory-ops';
 import { formatAIFirewallHttpError, guardApiRoute } from '@/lib/services/access-guard.service';
 import { Pipeline3WeeklyPlannerSchema, type Pipeline3Output } from '@/types/ai-schemas';
 import type { DayTimeMap, OutlineMode } from '@/types/domain';
-import {
-  LockAndPlanRequestSchema,
-  normalizeReminderTime,
-  type ConfirmedMemoryFact,
-} from './validation';
-import {
-  cleanupOrphanGoals,
-  processConfirmedMemoryFacts,
-  buildOnboardingAnswers,
-} from './helpers';
+import { LockAndPlanRequestSchema, normalizeReminderTime, type ConfirmedMemoryFact } from './validation';
+import { cleanupOrphanGoals, processConfirmedMemoryFacts, buildOnboardingAnswers } from './helpers';
 
 export const maxDuration = 60;
 
@@ -54,8 +47,12 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
   await cleanupOrphanGoals(admin, user.id);
 
-  // Enforce Free / Pro active goal limit from live system_settings
-  const { data: profile } = await admin.from('users').select('pro_until, language, country, person_memory_json, day_time_map_json').eq('id', user.id).single();
+  const { data: profile } = await admin
+    .from('users')
+    .select('pro_until, language, country, preferred_coaching_tone, person_memory_json, day_time_map_json')
+    .eq('id', user.id)
+    .single();
+
   const isPro = guard.profile.isPro;
   const maxActiveGoals = isPro ? guard.settings.pro_roadmap_allowance : guard.settings.free_roadmap_allowance;
   const { count: activeCount } = await admin.from('goals').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'ACTIVE');
@@ -67,7 +64,6 @@ export async function POST(request: NextRequest) {
     }, { status: 400 });
   }
 
-  // Enforce AI Firewall BEFORE creating goal/milestones so AI_KILL_SWITCH_ACTIVE / caps cleanly abort
   const firewall = await checkAIFirewall({
     userId: user.id,
     userIp: request.headers.get('x-forwarded-for'),
@@ -87,11 +83,12 @@ export async function POST(request: NextRequest) {
   const resolvedOutlineSummary = (body.extractedOutlineSummary || body.extracted_outline_summary || null)?.trim() || null;
   const resolvedDeadline = (body.deadlineDate || body.deadline_date || body.deadline || '').trim();
   const resolvedHoursPerDay = Math.max(0.5, Math.min(8.0, Number(body.hoursPerDay || body.hours_per_day || 2.0)));
-  const resolvedWorkingDays = (body.workingDays && body.workingDays.length > 0)
-    ? body.workingDays
-    : (body.working_days && body.working_days.length > 0)
-      ? body.working_days
-      : [0, 1, 2, 3, 4];
+  const resolvedWorkingDays =
+    body.workingDays && body.workingDays.length > 0
+      ? body.workingDays
+      : body.working_days && body.working_days.length > 0
+        ? body.working_days
+        : [0, 1, 2, 3, 4];
   const resolvedBaseline = (body.currentBaseline || body.current_baseline || '').trim();
   const resolvedConstraints = (body.constraints || '').trim();
   const resolvedTotalWeeks = body.totalWeeks || body.total_weeks || 12;
@@ -103,10 +100,8 @@ export async function POST(request: NextRequest) {
     await admin.from('users').update({ reminder_time: resolvedReminder }).eq('id', user.id);
   }
 
-  // Handle confirmed memory facts from Onboarding Step A
   const confirmedFacts: ConfirmedMemoryFact[] = body.confirmedMemoryFacts || body.confirmed_memory_facts || [];
   const newGoalItems = await processConfirmedMemoryFacts(admin, user.id, confirmedFacts, resolvedCategory, profile?.person_memory_json);
-
   const journeyMemory = { version: 1, items: newGoalItems, missing_context_boosters: body.boosters || [] };
   const defaultDayMap: DayTimeMap = {
     sat: { available_minutes: 60 }, sun: { available_minutes: 60 }, mon: { available_minutes: 60 },
@@ -161,10 +156,7 @@ export async function POST(request: NextRequest) {
     );
     try { await admin.from('onboarding_answers').insert(answersToInsert); } catch { /* non-fatal */ }
 
-    // Run Pipeline 3 for Week 1 Tasks using firewall-selected model
     const contextPack = buildContextPack(profile?.person_memory_json, journeyMemory, resolvedCategory, 15);
-    const todayStr = new Date().toISOString().slice(0, 10);
-
     const planOutput = await executeAIPipeline<Pipeline3Output>({
       pipeline: 'PIPELINE_3',
       userId: user.id,
@@ -180,11 +172,12 @@ export async function POST(request: NextRequest) {
         plan_style: resolvedPlanStyle,
         week_number: 1,
         total_weeks: resolvedTotalWeeks,
-        week_start_date: todayStr,
+        week_start_date: new Date().toISOString().slice(0, 10),
         hours_per_day: resolvedHoursPerDay,
         working_days_dates_json: resolvedWorkingDays,
         day_time_map_json: resolvedDayTimeMap || profile?.day_time_map_json || defaultDayMap,
         context_pack_json: contextPack,
+        preferred_coaching_tone: profile?.preferred_coaching_tone || 'GENTLE',
         user_state: 'STEADY',
         win_strategy_directive: 'Build momentum with clear, doable first steps',
         behavior_signals_json: {},
@@ -212,11 +205,7 @@ export async function POST(request: NextRequest) {
       how_to_steps_json: {
         example: t.how_to_steps?.example || '',
         steps: (t.how_to_steps?.steps || []).map((s) => ({
-          step_number: s.step_number,
-          text: s.text,
-          minutes: s.minutes,
-          done: false,
-          done_at: null,
+          step_number: s.step_number, text: s.text, minutes: s.minutes, done: false, done_at: null,
         })),
       },
       min_version_10m: (t.min_version_10m || '').slice(0, 200),
@@ -228,6 +217,13 @@ export async function POST(request: NextRequest) {
 
     const { error: taskError } = await admin.from('tasks').insert(taskInserts);
     if (taskError) throw new Error(`Failed to insert tasks: ${taskError.message}`);
+
+    if (planOutput.today_context_line?.trim()) {
+      await admin.from('goals').update({ today_context_line: planOutput.today_context_line.trim().slice(0, 140) }).eq('id', goal.id);
+    }
+    if (planOutput.proposed_memory_ops?.length) {
+      await applyProposedMemoryOps({ supabaseAdmin: admin, userId: user.id, goalId: goal.id, ops: planOutput.proposed_memory_ops });
+    }
 
     return NextResponse.json({ ok: true, goalId: goal.id });
   } catch (err) {

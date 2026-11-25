@@ -3,16 +3,17 @@ import 'server-only';
  * 1. Purpose: Orchestrates idempotent Week Review (Pipeline 5) and delegates Week N+1 planning.
  * 2. Spec Ref: UI Design Guide Category C Screen 37, Category H Screens 97-103, and Pipeline 5.
  * 3. Called By: /api/weeks/review and /api/weeks/complete.
- * 4. Calls: Admin Supabase client, Pipeline 5, persona-engine, and week-rollover-service.
+ * 4. Calls: Admin Supabase client, Pipeline 5, goal-signals, memory-ops, and week-rollover-service.
  */
 
 import { createAdminClient } from '@/lib/db/admin';
 import { executeAIPipeline } from '@/lib/ai/assembler';
 import { AIFirewallError, checkAIFirewall } from '@/lib/ai/firewall';
 import { buildContextPack } from '@/lib/ai/context-pack';
-import { evaluatePersonaProfile } from '@/lib/ai/persona-engine';
+import { loadGoalIntelligenceSignals } from '@/lib/ai/goal-signals';
+import { applyProposedMemoryOps } from '@/lib/ai/memory-ops';
 import { Pipeline5WeeklyReviewSchema, type Pipeline5Output } from '@/types/ai-schemas';
-import type { TaskRow } from '@/types/db/goal-tables';
+import type { GoalRow, TaskRow } from '@/types/db/goal-tables';
 import { planNextWeek, type PlanNextWeekResult } from './week-rollover-service';
 
 export interface ReviewWeekResult {
@@ -29,14 +30,15 @@ export async function reviewWeek(
 ): Promise<ReviewWeekResult> {
   const admin = createAdminClient();
 
-  const { data: goal, error: goalErr } = await admin
+  const { data: goalRow, error: goalErr } = await admin
     .from('goals')
     .select('*')
     .eq('id', goalId)
     .eq('user_id', userId)
     .single();
 
-  if (goalErr || !goal) throw new Error('Goal not found');
+  if (goalErr || !goalRow) throw new Error('Goal not found');
+  const goal = goalRow as unknown as GoalRow;
   const currentWeek = goal.current_week_number;
 
   // Idempotency check: return existing COMPLETED review in <200ms without calling Gemini
@@ -55,19 +57,18 @@ export async function reviewWeek(
     };
   }
 
-  const [{ data: user }, { data: milestones }, { data: weekTasks }, { data: dayNotes }] =
-    await Promise.all([
-      admin
-        .from('users')
-        .select('id, person_memory_json, day_time_map_json, language, country')
-        .eq('id', userId)
-        .single(),
-      admin.from('milestones').select('*').eq('goal_id', goalId).order('position', { ascending: true }),
-      admin.from('tasks').select('*').eq('goal_id', goalId).eq('week_number', currentWeek),
-      admin.from('day_notes').select('*').eq('goal_id', goalId).eq('digested_in_plan', false),
-    ]);
+  const [{ data: user }, { data: milestones }, { data: weekTasks }, signals] = await Promise.all([
+    admin
+      .from('users')
+      .select('id, person_memory_json, day_time_map_json, language, country, preferred_coaching_tone')
+      .eq('id', userId)
+      .single(),
+    admin.from('milestones').select('*').eq('goal_id', goalId).order('position', { ascending: true }),
+    admin.from('tasks').select('*').eq('goal_id', goalId).eq('week_number', currentWeek),
+    loadGoalIntelligenceSignals({ supabaseAdmin: admin, goal }),
+  ]);
 
-  const tasks = (weekTasks || []) as TaskRow[];
+  const tasks = (weekTasks || []) as unknown as TaskRow[];
   const completedTasks = tasks.filter((t) => t.status === 'DONE');
   const carriedOrSkipped = tasks.filter((t) => t.status !== 'DONE');
   const contextPack = buildContextPack(
@@ -76,22 +77,13 @@ export async function reviewWeek(
     goal.category,
     15
   );
-  const persona = evaluatePersonaProfile({
-    scheduledWorkingDays: goal.working_days || [1, 2, 3, 4, 5],
-    lastActivityDate: goal.last_activity_date || null,
-    tasksLast14Days: tasks,
-    evidenceLast10: [],
-  });
 
-  const firewall5 = await checkAIFirewall({
-    userId,
-    pipeline: 'PIPELINE_5',
-    goalId,
-  });
+  const firewall5 = await checkAIFirewall({ userId, pipeline: 'PIPELINE_5', goalId });
   if (!firewall5.allowed) {
     throw new AIFirewallError(firewall5.reason || 'FIREWALL_BLOCKED', firewall5.retryAfterSeconds);
   }
 
+  const { persona } = signals;
   const p5Output = await executeAIPipeline<Pipeline5Output>(
     {
       pipeline: 'PIPELINE_5',
@@ -106,8 +98,9 @@ export async function reviewWeek(
         execution_mode: goal.execution_mode,
         plan_style: goal.plan_style,
         week_number: currentWeek,
-        total_weeks: 12,
+        total_weeks: signals.totalWeeks,
         current_baseline: goal.current_baseline_text,
+        preferred_coaching_tone: user?.preferred_coaching_tone || 'GENTLE',
         user_state: persona.user_state,
         win_strategy_directive: persona.win_strategy_directive,
         behavior_signals_json: {
@@ -118,9 +111,9 @@ export async function reviewWeek(
         },
         completed_tasks_json: completedTasks,
         carried_or_skipped_tasks_json: carriedOrSkipped,
-        reality_check_measurements_json: [],
-        day_notes_json: dayNotes || [],
-        effort_ratings_summary_json: {},
+        reality_check_measurements_json: signals.realityCheckMeasurements,
+        day_notes_json: signals.recentDayNotes,
+        effort_ratings_summary_json: signals.effortRatingsSummary,
         all_milestones_json: milestones || [],
         context_pack_json: contextPack,
         day_time_map_json: user?.day_time_map_json || {},
@@ -128,6 +121,13 @@ export async function reviewWeek(
     },
     Pipeline5WeeklyReviewSchema
   );
+
+  await applyProposedMemoryOps({
+    supabaseAdmin: admin,
+    userId: goal.user_id,
+    goalId: goal.id,
+    ops: p5Output.proposed_memory_ops,
+  });
 
   await admin
     .from('day_notes')
